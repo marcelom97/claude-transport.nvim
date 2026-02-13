@@ -45,7 +45,7 @@ function M.create_server(config, callbacks, auth_token)
 		on_message = callbacks.on_message or function() end,
 		on_connect = callbacks.on_connect or function() end,
 		on_disconnect = callbacks.on_disconnect or function() end,
-		on_error = callbacks.on_error or function() end,
+		on_error = callbacks.on_error or function(_) end,
 	}
 
 	local ok, err = tcp_server:bind("127.0.0.1", port)
