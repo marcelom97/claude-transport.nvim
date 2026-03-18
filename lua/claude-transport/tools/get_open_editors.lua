@@ -38,7 +38,7 @@ local function handler(params)
 				end
 
 				-- Get language ID (filetype)
-				local ok_lang, language_id = pcall(vim.api.nvim_buf_get_option, bufnr, "filetype")
+				local ok_lang, language_id = pcall(vim.api.nvim_get_option_value, "filetype", { buf = bufnr })
 				if not ok_lang or language_id == nil or language_id == "" then
 					language_id = "plaintext"
 				end
@@ -73,7 +73,7 @@ local function handler(params)
 					isPinned = false, -- Neovim doesn't have pinned tabs
 					isPreview = false, -- Neovim doesn't have preview tabs
 					isDirty = (function()
-						local ok, modified = pcall(vim.api.nvim_buf_get_option, bufnr, "modified")
+						local ok, modified = pcall(vim.api.nvim_get_option_value, "modified", { buf = bufnr })
 						return ok and modified or false
 					end)(),
 					label = label,

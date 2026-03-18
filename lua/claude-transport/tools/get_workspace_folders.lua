@@ -13,19 +13,19 @@ local schema = {
 ---Retrieves workspace folders, currently defaulting to CWD and attempting LSP integration.
 ---@return table MCP-compliant response with workspace folders data
 local function handler(params)
-	local cwd = vim.fn.getcwd()
+	local lockfile = require("claude-transport.lockfile")
+	local paths = lockfile.get_workspace_folders()
 
-	-- TODO: Enhance integration with LSP workspace folders if available,
-	-- similar to how it's done in claude-transport.lockfile.get_workspace_folders.
-	-- For now, this is a simplified version as per the original tool's direct implementation.
+	local folders = {}
+	for _, path in ipairs(paths) do
+		table.insert(folders, {
+			name = vim.fn.fnamemodify(path, ":t"),
+			uri = "file://" .. path,
+			path = path,
+		})
+	end
 
-	local folders = {
-		{
-			name = vim.fn.fnamemodify(cwd, ":t"),
-			uri = "file://" .. cwd,
-			path = cwd,
-		},
-	}
+	local root_path = paths[1] or vim.fn.getcwd()
 
 	return {
 		content = {
@@ -34,7 +34,7 @@ local function handler(params)
 				text = vim.json.encode({
 					success = true,
 					folders = folders,
-					rootPath = cwd,
+					rootPath = root_path,
 				}, { indent = 2 }),
 			},
 		},

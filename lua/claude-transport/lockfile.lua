@@ -83,6 +83,8 @@ function M.create(port, auth_token)
 		return false, "Failed to create lock directory: " .. (err or "unknown error")
 	end
 
+	pcall(vim.loop.fs_chmod, M.lock_dir, tonumber("700", 8))
+
 	local lock_path = M.lock_dir .. "/" .. port .. ".lock"
 
 	local workspace_folders = M.get_workspace_folders()
@@ -140,6 +142,8 @@ function M.create(port, auth_token)
 		end)
 		return false, "Failed to write lock file: " .. (write_err or "unknown error")
 	end
+
+	pcall(vim.loop.fs_chmod, lock_path, tonumber("600", 8))
 
 	return true, lock_path, auth_token
 end

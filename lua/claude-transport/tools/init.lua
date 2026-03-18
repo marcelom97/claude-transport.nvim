@@ -126,6 +126,10 @@ function M.handle_invoke(client, params)
 		return { error = { code = err_code, message = err_msg, data = err_data_payload } }
 	end
 
+	if type(handler_return_val1) == "table" and handler_return_val1._deferred then
+		return { _deferred = true, setup = handler_return_val1.setup }
+	end
+
 	return { result = handler_return_val1 }
 end
 

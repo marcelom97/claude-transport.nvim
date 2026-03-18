@@ -4,7 +4,7 @@ Headless WebSocket transport layer for [Claude Code CLI](https://docs.anthropic.
 
 ## Requirements
 
-- Neovim 0.10+
+- Neovim 0.10.0+
 - LuaJIT (ships with Neovim)
 - OpenSSL (`libcrypto`) — used via FFI for WebSocket handshake (SHA-1)
 
@@ -82,6 +82,39 @@ transport.get_registered_tools()
 transport.on("connect", function(conn) end)
 transport.on("disconnect", function(conn) end)
 transport.on("message", function(conn, msg) end)
+```
+
+## Statusline
+
+### Lua API
+
+```lua
+local sl = require("claude-transport.statusline")
+
+sl.get()          -- { running = bool, connected = bool, port = number|nil, client_count = number }
+sl.is_connected() -- bool
+sl.text()         -- "Claude: connected (port 12345)" or "Claude: off"
+sl.icon()         -- { icon = "󰚩", color = "green" | "yellow" | "grey" }
+```
+
+### lualine.nvim
+
+```lua
+lualine_x = { "claude_transport" }
+```
+
+### mini.statusline
+
+```lua
+local ct = require("claude-transport.statusline")
+local icon = ct.icon()
+return icon.icon .. " " .. ct.text()
+```
+
+### Built-in statusline
+
+```lua
+vim.o.statusline = vim.o.statusline .. " %{v:lua.require('claude-transport.statusline').text()}"
 ```
 
 ## How It Works

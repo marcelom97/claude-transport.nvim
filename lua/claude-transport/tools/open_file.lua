@@ -55,8 +55,8 @@ local function find_main_editor_window()
 
 	for _, win in ipairs(windows) do
 		local buf = vim.api.nvim_win_get_buf(win)
-		local buftype = vim.api.nvim_buf_get_option(buf, "buftype")
-		local filetype = vim.api.nvim_buf_get_option(buf, "filetype")
+		local buftype = vim.api.nvim_get_option_value("buftype", { buf = buf })
+		local filetype = vim.api.nvim_get_option_value("filetype", { buf = buf })
 		local win_config = vim.api.nvim_win_get_config(win)
 
 		-- Check if this is a suitable window
@@ -145,7 +145,7 @@ local function handler(params)
 
 		-- If we're still in a special window, create a new split
 		local buf = vim.api.nvim_win_get_buf(vim.api.nvim_get_current_win())
-		local buftype = vim.api.nvim_buf_get_option(buf, "buftype")
+		local buftype = vim.api.nvim_get_option_value("buftype", { buf = buf })
 
 		if buftype == "terminal" or buftype == "nofile" then
 			vim.cmd("vsplit")
@@ -260,7 +260,7 @@ local function handler(params)
 		local detailed_info = {
 			success = true,
 			filePath = file_path,
-			languageId = vim.api.nvim_buf_get_option(buf, "filetype"),
+			languageId = vim.api.nvim_get_option_value("filetype", { buf = buf }),
 			lineCount = vim.api.nvim_buf_line_count(buf),
 		}
 
