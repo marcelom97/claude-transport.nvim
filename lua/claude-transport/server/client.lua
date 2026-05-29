@@ -1,6 +1,7 @@
 ---@brief WebSocket client connection management
 local frame = require("claude-transport.server.frame")
 local handshake = require("claude-transport.server.handshake")
+local utils = require("claude-transport.server.utils")
 local logger = require("claude-transport.logger")
 
 local M = {}
@@ -13,6 +14,7 @@ local M = {}
 ---@field handshake_complete boolean Whether WebSocket handshake is complete
 ---@field last_ping number Timestamp of last ping sent
 ---@field last_pong number Timestamp of last pong received
+---@field fragment table|nil In-progress fragmented message: { opcode = number, parts = string[] }
 
 ---Create a new WebSocket client
 ---@param tcp_handle table The vim.loop TCP handle
@@ -133,14 +135,38 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 
 		client.buffer = client.buffer:sub(bytes_consumed + 1)
 
-		if parsed_frame.opcode == frame.OPCODE.TEXT or parsed_frame.opcode == frame.OPCODE.BINARY then
-			handle_data_frame(parsed_frame, client, on_message)
-		elseif frame.is_control_frame(parsed_frame.opcode) then
+		local opcode = parsed_frame.opcode
+		if opcode == frame.OPCODE.TEXT or opcode == frame.OPCODE.BINARY then
+			if client.fragment then
+				on_error(client, "Protocol error: new data frame during a fragmented message")
+				M.close_client(client, 1002, "interleaved data frame")
+				return
+			end
+			if parsed_frame.fin then
+				handle_data_frame(parsed_frame, client, on_message)
+			else
+				client.fragment = { opcode = opcode, parts = { parsed_frame.payload } }
+			end
+		elseif opcode == frame.OPCODE.CONTINUATION then
+			if not client.fragment then
+				on_error(client, "Protocol error: continuation frame with no message in progress")
+				M.close_client(client, 1002, "unexpected continuation frame")
+				return
+			end
+			client.fragment.parts[#client.fragment.parts + 1] = parsed_frame.payload
+			if parsed_frame.fin then
+				local message = table.concat(client.fragment.parts)
+				local is_text = client.fragment.opcode == frame.OPCODE.TEXT
+				client.fragment = nil
+				if is_text and not utils.is_valid_utf8(message) then
+					on_error(client, "Protocol error: invalid UTF-8 in fragmented text message")
+					M.close_client(client, 1002, "invalid UTF-8")
+					return
+				end
+				handle_data_frame({ opcode = parsed_frame.opcode, payload = message }, client, on_message)
+			end
+		elseif frame.is_control_frame(opcode) then
 			handle_control_frame(parsed_frame, client, on_close)
-		elseif parsed_frame.opcode == frame.OPCODE.CONTINUATION then
-			on_error(client, "Fragmented messages not supported")
-			M.close_client(client, 1003, "Unsupported data")
-			return
 		end
 	end
 end

@@ -10,7 +10,6 @@ describe("config", function()
 			assert.equals(10000, config.defaults.port_range.min)
 			assert.equals(65535, config.defaults.port_range.max)
 		end)
-
 	end)
 
 	describe("validate", function()
@@ -65,7 +64,6 @@ describe("config", function()
 				config.validate(bad)
 			end)
 		end)
-
 	end)
 
 	describe("apply", function()

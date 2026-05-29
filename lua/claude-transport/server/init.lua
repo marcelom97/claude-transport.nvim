@@ -160,8 +160,11 @@ end
 function M.register_handlers()
 	M.state.handlers = {
 		["initialize"] = function(client, params)
+			local requested = params and params.protocolVersion
+			local protocol_version = (type(requested) == "string" and requested ~= "") and requested
+				or MCP_PROTOCOL_VERSION
 			return {
-				protocolVersion = MCP_PROTOCOL_VERSION,
+				protocolVersion = protocol_version,
 				capabilities = {
 					logging = vim.empty_dict(),
 					prompts = { listChanged = true },

@@ -37,20 +37,23 @@ describe("WebSocket handshake", function()
 		end)
 
 		it("rejects missing Upgrade header", function()
-			local bad = "GET / HTTP/1.1\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+			local bad =
+				"GET / HTTP/1.1\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
 			local valid, err = handshake.validate_upgrade_request(bad, nil)
 			assert.is_false(valid)
 			assert.matches("Upgrade", err)
 		end)
 
 		it("rejects missing Sec-WebSocket-Key", function()
-			local bad = "GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"
+			local bad =
+				"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"
 			local valid, err = handshake.validate_upgrade_request(bad, nil)
 			assert.is_false(valid)
 		end)
 
 		it("rejects wrong WebSocket version", function()
-			local bad = "GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 8\r\n\r\n"
+			local bad =
+				"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 8\r\n\r\n"
 			local valid, err = handshake.validate_upgrade_request(bad, nil)
 			assert.is_false(valid)
 		end)

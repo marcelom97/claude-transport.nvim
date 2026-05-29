@@ -63,6 +63,33 @@ describe("client process_data (post-handshake)", function()
 		assert.is_not.equals("connected", client.state)
 	end)
 
+	it("reassembles a fragmented text message", function()
+		local client = connected_client()
+		local got
+		local on_message = function(_, msg)
+			got = msg
+		end
+		local f1 = frame.create_frame(frame.OPCODE.TEXT, "Hel", false, true)
+		local f2 = frame.create_frame(frame.OPCODE.CONTINUATION, "lo ", false, true)
+		local f3 = frame.create_frame(frame.OPCODE.CONTINUATION, "World", true, true)
+		client_mod.process_data(client, f1 .. f2 .. f3, on_message, function() end, function() end, nil)
+		vim.wait(200, function()
+			return got ~= nil
+		end, 10)
+		assert.equals("Hello World", got)
+	end)
+
+	it("closes with 1002 on a continuation frame with no message in progress", function()
+		local client, handle = connected_client()
+		local err_called = false
+		local orphan = frame.create_frame(frame.OPCODE.CONTINUATION, "x", true, true)
+		client_mod.process_data(client, orphan, function() end, function() end, function()
+			err_called = true
+		end, nil)
+		assert.is_true(err_called)
+		assert.is_true(handle.closed)
+	end)
+
 	it("buffers a partial frame until the rest arrives", function()
 		local client = connected_client()
 		local got

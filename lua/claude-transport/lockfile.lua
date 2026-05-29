@@ -236,6 +236,55 @@ function M.get_auth_token(port)
 	return true, auth_token, nil
 end
 
+---Check whether a process id refers to a running process.
+---@param pid any The pid to probe
+---@return boolean alive True if the process exists (or exists but is not signalable by us)
+function M.is_pid_alive(pid)
+	if type(pid) ~= "number" or pid <= 0 then
+		return false
+	end
+	-- Signal 0 performs error checking without sending a signal.
+	local res = { pcall(vim.loop.kill, pid, 0) }
+	if not res[1] then
+		return false
+	end
+	local ret, err_name = res[2], res[4]
+	if ret == 0 then
+		return true
+	end
+	-- EPERM: the process exists but belongs to another user.
+	if err_name == "EPERM" then
+		return true
+	end
+	return false
+end
+
+---Remove lock files left behind by Neovim instances that are no longer running.
+---@return string[] removed Paths of the lock files that were removed
+function M.cleanup_stale()
+	local removed = {}
+	if vim.fn.isdirectory(M.lock_dir) == 0 then
+		return removed
+	end
+
+	local entries = vim.fn.glob(M.lock_dir .. "/*.lock", true, true)
+	for _, path in ipairs(entries) do
+		local file = io.open(path, "r")
+		if file then
+			local content = file:read("*all")
+			file:close()
+			local ok, data = pcall(vim.json.decode, content or "")
+			if ok and type(data) == "table" and type(data.pid) == "number" and not M.is_pid_alive(data.pid) then
+				if pcall(os.remove, path) then
+					removed[#removed + 1] = path
+				end
+			end
+		end
+	end
+
+	return removed
+end
+
 ---Get active LSP clients using available API
 ---@return table Array of LSP clients
 local function get_lsp_clients()

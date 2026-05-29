@@ -1,0 +1,7 @@
+describe("health", function()
+	it("exposes a check function that runs without error", function()
+		local health = require("claude-transport.health")
+		assert.equals("function", type(health.check))
+		assert.is_true(pcall(health.check))
+	end)
+end)

@@ -140,6 +140,15 @@ describe("WebSocket frame", function()
 			assert.equals(0, consumed)
 			assert.is_string(err)
 		end)
+
+		it("does not UTF-8 validate a non-final text frame (codepoint may span frames)", function()
+			-- "\xC3" is the first byte of a two-byte UTF-8 sequence; invalid on its own.
+			local data = frame.create_frame(frame.OPCODE.TEXT, "\xC3", false, true)
+			local parsed, _, err = frame.parse_frame(data)
+			assert.is_not_nil(parsed)
+			assert.is_nil(err)
+			assert.is_false(parsed.fin)
+		end)
 	end)
 
 	describe("is_control_frame", function()

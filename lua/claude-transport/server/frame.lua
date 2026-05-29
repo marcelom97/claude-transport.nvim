@@ -123,7 +123,9 @@ function M.parse_frame(data)
 		return nil, 0, nil
 	end
 
-	if header.opcode == M.OPCODE.TEXT and not utils.is_valid_utf8(payload) then
+	-- Only validate UTF-8 on a final text frame; a fragmented message may split a
+	-- multi-byte codepoint across frames, so partial frames are validated on reassembly.
+	if header.opcode == M.OPCODE.TEXT and header.fin and not utils.is_valid_utf8(payload) then
 		return nil, 0, "invalid UTF-8 in text frame"
 	end
 

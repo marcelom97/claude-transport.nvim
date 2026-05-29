@@ -101,4 +101,22 @@ describe("server utils", function()
 			assert.equals("text/plain", headers["content-type"])
 		end)
 	end)
+
+	describe("constant_time_equals", function()
+		it("returns true for identical strings", function()
+			assert.is_true(utils.constant_time_equals("a-secret-token", "a-secret-token"))
+		end)
+
+		it("returns false for same-length differing strings", function()
+			assert.is_false(utils.constant_time_equals("a-secret-token", "a-secret-tokem"))
+		end)
+
+		it("returns false for different-length strings", function()
+			assert.is_false(utils.constant_time_equals("short", "longer-token"))
+		end)
+
+		it("returns false for non-string input", function()
+			assert.is_false(utils.constant_time_equals(nil, "token"))
+		end)
+	end)
 end)

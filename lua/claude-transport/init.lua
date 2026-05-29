@@ -50,6 +50,13 @@ function M.setup(opts)
 		end
 	end, { desc = "Show Claude transport server status" })
 
+	vim.api.nvim_create_user_command("ClaudeTransportSend", function(args)
+		local ok, err = M.send_at_mention(args.line1, args.line2)
+		if not ok then
+			vim.notify("Claude transport: " .. tostring(err), vim.log.levels.WARN)
+		end
+	end, { range = true, desc = "Send the current selection to Claude as an @-mention" })
+
 	if M.state.config.auto_start then
 		M.start()
 	end
@@ -92,6 +99,8 @@ function M.start()
 	M.state.server = server
 	M.state.port = tonumber(result)
 	M.state.auth_token = auth_token
+
+	pcall(lockfile.cleanup_stale)
 
 	local lock_success, lock_result = lockfile.create(M.state.port, auth_token)
 	if not lock_success then
@@ -207,6 +216,26 @@ function M.notify_at_mention(file_path, start_line, end_line)
 		lineStart = start_line,
 		lineEnd = end_line,
 	})
+end
+
+---Send the given line range of the current buffer to Claude as an @-mention.
+---@param start_line number 1-based first line
+---@param end_line number 1-based last line
+---@return boolean ok
+---@return string? error
+function M.send_at_mention(start_line, end_line)
+	if not M.is_running() then
+		return false, "server not running"
+	end
+	if not M.is_connected() then
+		return false, "no Claude client connected"
+	end
+	local file_path = vim.api.nvim_buf_get_name(0)
+	if not file_path or file_path == "" then
+		return false, "current buffer is not backed by a file"
+	end
+	M.notify_at_mention(file_path, start_line, end_line)
+	return true
 end
 
 function M.register_tool(name, schema, handler)
