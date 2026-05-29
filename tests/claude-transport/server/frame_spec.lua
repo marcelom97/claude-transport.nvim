@@ -98,6 +98,50 @@ describe("WebSocket frame", function()
 		end)
 	end)
 
+	describe("parse_frame error signaling", function()
+		it("reports incomplete (no error) for a truncated valid frame", function()
+			local full = frame.create_frame(frame.OPCODE.TEXT, "hello world", true, true)
+			local partial = full:sub(1, #full - 3)
+			local parsed, consumed, err = frame.parse_frame(partial)
+			assert.is_nil(parsed)
+			assert.equals(0, consumed)
+			assert.is_nil(err)
+		end)
+
+		it("reports a protocol error when reserved bits are set", function()
+			local data = string.char(0xC1) .. string.char(0x80) .. "\0\0\0\0"
+			local parsed, consumed, err = frame.parse_frame(data)
+			assert.is_nil(parsed)
+			assert.equals(0, consumed)
+			assert.is_string(err)
+		end)
+
+		it("reports a protocol error for an invalid opcode", function()
+			local data = string.char(0x83) .. string.char(0x80) .. "\0\0\0\0"
+			local parsed, consumed, err = frame.parse_frame(data)
+			assert.is_nil(parsed)
+			assert.equals(0, consumed)
+			assert.is_string(err)
+		end)
+
+		it("reports a protocol error for an over-long control frame", function()
+			local data = string.char(0x88) .. string.char(0xFE)
+			local parsed, consumed, err = frame.parse_frame(data)
+			assert.is_nil(parsed)
+			assert.equals(0, consumed)
+			assert.is_string(err)
+		end)
+
+		it("reports a protocol error for invalid UTF-8 in a text frame", function()
+			local payload = "\xC0\x00"
+			local data = string.char(0x81) .. string.char(#payload) .. payload
+			local parsed, consumed, err = frame.parse_frame(data)
+			assert.is_nil(parsed)
+			assert.equals(0, consumed)
+			assert.is_string(err)
+		end)
+	end)
+
 	describe("is_control_frame", function()
 		it("returns true for close", function()
 			assert.is_true(frame.is_control_frame(frame.OPCODE.CLOSE))

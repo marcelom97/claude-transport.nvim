@@ -46,7 +46,6 @@ function M.register(tool_module)
 	M.tools[tool_module.name] = {
 		handler = tool_module.handler,
 		schema = tool_module.schema,
-		requires_coroutine = tool_module.requires_coroutine,
 	}
 end
 
@@ -78,20 +77,7 @@ function M.handle_invoke(client, params)
 	api.emit("tool_call", client, tool_name, input)
 
 	local tool_data = M.tools[tool_name]
-	local pcall_results
-
-	if tool_data.requires_coroutine then
-		local co = coroutine.create(function()
-			return tool_data.handler(input)
-		end)
-		local success, result = coroutine.resume(co)
-		if coroutine.status(co) == "suspended" then
-			return { _deferred = true, coroutine = co, client = client, params = params }
-		end
-		pcall_results = { success, result }
-	else
-		pcall_results = { pcall(tool_data.handler, input) }
-	end
+	local pcall_results = { pcall(tool_data.handler, input) }
 
 	local pcall_success = pcall_results[1]
 	local handler_return_val1 = pcall_results[2]
@@ -124,10 +110,6 @@ function M.handle_invoke(client, params)
 			err_msg = err_val
 		end
 		return { error = { code = err_code, message = err_msg, data = err_data_payload } }
-	end
-
-	if type(handler_return_val1) == "table" and handler_return_val1._deferred then
-		return { _deferred = true, setup = handler_return_val1.setup }
 	end
 
 	return { result = handler_return_val1 }

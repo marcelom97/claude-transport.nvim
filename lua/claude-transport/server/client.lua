@@ -112,14 +112,24 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 	end
 
 	while #client.buffer >= 2 do -- Minimum frame size
-		local parsed_frame, bytes_consumed = frame.parse_frame(client.buffer)
+		local parsed_frame, bytes_consumed, parse_err = frame.parse_frame(client.buffer)
 
 		if not parsed_frame then
-			break
+			if parse_err then
+				-- Malformed frame: closing beats stalling on an unparseable buffer.
+				on_error(client, "Protocol error: " .. parse_err)
+				M.close_client(client, 1002, parse_err)
+				return
+			end
+			break -- Incomplete frame: wait for more data.
 		end
 
-		-- Frame validation is now handled entirely within frame.parse_frame.
-		-- If frame.parse_frame returns a frame, it's considered valid.
+		-- RFC 6455 §5.1: every client-to-server frame must be masked.
+		if not parsed_frame.masked then
+			on_error(client, "Protocol error: client frame not masked")
+			M.close_client(client, 1002, "client frame must be masked")
+			return
+		end
 
 		client.buffer = client.buffer:sub(bytes_consumed + 1)
 
@@ -130,6 +140,7 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 		elseif parsed_frame.opcode == frame.OPCODE.CONTINUATION then
 			on_error(client, "Fragmented messages not supported")
 			M.close_client(client, 1003, "Unsupported data")
+			return
 		end
 	end
 end

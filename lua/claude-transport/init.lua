@@ -115,9 +115,6 @@ function M.start()
 	local selection = require("claude-transport.selection")
 	selection.enable(M.state.server, 50)
 
-	local diagnostics_module = require("claude-transport.diagnostics")
-	diagnostics_module.enable(M.state.server)
-
 	logger.info("init", "Claude transport started on port " .. tostring(M.state.port))
 	return true, M.state.port
 end
@@ -129,9 +126,6 @@ function M.stop()
 
 	local selection = require("claude-transport.selection")
 	selection.disable()
-
-	local diagnostics_module = require("claude-transport.diagnostics")
-	diagnostics_module.disable()
 
 	local lockfile = require("claude-transport.lockfile")
 	lockfile.remove(M.state.port)

@@ -84,39 +84,6 @@ transport.on("disconnect", function(conn) end)
 transport.on("message", function(conn, msg) end)
 ```
 
-## Statusline
-
-### Lua API
-
-```lua
-local sl = require("claude-transport.statusline")
-
-sl.get()          -- { running = bool, connected = bool, port = number|nil, client_count = number }
-sl.is_connected() -- bool
-sl.text()         -- "Claude: connected (port 12345)" or "Claude: off"
-sl.icon()         -- { icon = "󰚩", color = "green" | "yellow" | "grey" }
-```
-
-### lualine.nvim
-
-```lua
-lualine_x = { "claude_transport" }
-```
-
-### mini.statusline
-
-```lua
-local ct = require("claude-transport.statusline")
-local icon = ct.icon()
-return icon.icon .. " " .. ct.text()
-```
-
-### Built-in statusline
-
-```lua
-vim.o.statusline = vim.o.statusline .. " %{v:lua.require('claude-transport.statusline').text()}"
-```
-
 ## How It Works
 
 1. On start, the plugin binds a TCP server to a random localhost port
@@ -124,6 +91,15 @@ vim.o.statusline = vim.o.statusline .. " %{v:lua.require('claude-transport.statu
 3. Claude Code CLI discovers the lock file and connects via WebSocket
 4. Communication uses JSON-RPC 2.0 over the MCP protocol (version `2024-11-05`)
 5. Selection tracking autocmds keep Claude aware of your cursor/visual selection
+
+To connect a Claude Code session running in a separate terminal, run `/ide` inside
+that session and pick the Neovim instance.
+
+## Limitations
+
+- WebSocket message fragmentation (continuation frames) is not supported. Claude
+  Code sends each JSON-RPC message in a single frame, so this does not affect
+  normal use; fragmented frames are rejected with close code `1003`.
 
 ## License
 
