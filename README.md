@@ -1,10 +1,12 @@
 # claude-transport.nvim
 
+![CI](https://github.com/marcelom97/claude-transport.nvim/actions/workflows/ci.yml/badge.svg)
+
 Headless WebSocket transport layer for [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code). Implements the [MCP protocol](https://modelcontextprotocol.io/) over WebSocket so Claude Code can interact with your Neovim instance — read buffers, track selections, run diagnostics, and more. Pure Lua API, no UI.
 
 ## Requirements
 
-- Neovim 0.10+
+- Neovim 0.10.0+
 - LuaJIT (ships with Neovim)
 - OpenSSL (`libcrypto`) — used via FFI for WebSocket handshake (SHA-1)
 
@@ -37,6 +39,10 @@ require("claude-transport").setup({
 | `:ClaudeTransportStart` | Start the WebSocket server |
 | `:ClaudeTransportStop` | Stop the WebSocket server |
 | `:ClaudeTransportStatus` | Show server status (port, connection count) |
+| `:[range]ClaudeTransportSend` | Send the current line/selection to Claude as an `@`-mention |
+
+Run `:checkhealth claude-transport` to verify your setup (Neovim version, OpenSSL
+FFI, lock file directory, server status).
 
 ## Built-in MCP Tools
 
@@ -91,6 +97,11 @@ transport.on("message", function(conn, msg) end)
 3. Claude Code CLI discovers the lock file and connects via WebSocket
 4. Communication uses JSON-RPC 2.0 over the MCP protocol (version `2024-11-05`)
 5. Selection tracking autocmds keep Claude aware of your cursor/visual selection
+
+To connect a Claude Code session running in a separate terminal, run `/ide` inside
+that session and pick the Neovim instance.
+
+Stale lock files from crashed Neovim instances are pruned automatically on start.
 
 ## License
 

@@ -44,7 +44,7 @@ function M.validate_upgrade_request(request, expected_auth_token)
 			return false, "Invalid or missing authentication header"
 		end
 
-		if auth_header ~= expected_auth_token then
+		if not utils.constant_time_equals(auth_header, expected_auth_token) then
 			return false, "Invalid authentication token"
 		end
 	end

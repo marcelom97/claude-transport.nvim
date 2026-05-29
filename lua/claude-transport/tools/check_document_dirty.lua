@@ -42,7 +42,7 @@ local function handler(params)
 		}
 	end
 
-	local is_dirty = vim.api.nvim_buf_get_option(bufnr, "modified")
+	local is_dirty = vim.api.nvim_get_option_value("modified", { buf = bufnr })
 	local is_untitled = vim.api.nvim_buf_get_name(bufnr) == ""
 
 	-- Return MCP-compliant format with JSON-stringified result

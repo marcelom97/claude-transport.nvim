@@ -143,6 +143,25 @@ function M.bytes_to_uint64(bytes)
 	return num
 end
 
+---Compare two strings in constant time relative to their length.
+---Avoids leaking how many leading bytes matched via early-exit timing.
+---@param a string
+---@param b string
+---@return boolean equal
+function M.constant_time_equals(a, b)
+	if type(a) ~= "string" or type(b) ~= "string" then
+		return false
+	end
+	if #a ~= #b then
+		return false
+	end
+	local diff = 0
+	for i = 1, #a do
+		diff = bit.bor(diff, bit.bxor(a:byte(i), b:byte(i)))
+	end
+	return diff == 0
+end
+
 function M.apply_mask(data, mask)
 	local result = {}
 	local m1, m2, m3, m4 = mask:byte(1, 4)

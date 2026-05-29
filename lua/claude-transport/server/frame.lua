@@ -24,9 +24,15 @@ function M.is_control_frame(opcode)
 	return opcode >= 0x8
 end
 
+-- Parsers return one of three shapes so callers can tell apart a frame that is
+-- merely incomplete (wait for more bytes) from one that violates the protocol
+-- (close the connection):
+--   success:        value, next_offset[, nil]
+--   incomplete:     nil, 0, nil
+--   protocol error: nil, 0, "<reason>"
 local function parse_header(data)
 	if #data < 2 then
-		return nil, 0
+		return nil, 0, nil
 	end
 
 	local b1, b2 = data:byte(1, 2)
@@ -37,35 +43,35 @@ local function parse_header(data)
 	local len_code = b2 % 128
 
 	if rsv ~= 0 then
-		return nil, 0
+		return nil, 0, "reserved bits must be zero"
 	end
 	if not VALID_OPCODES[opcode] then
-		return nil, 0
+		return nil, 0, "invalid opcode: " .. opcode
 	end
 	if M.is_control_frame(opcode) and (not fin or len_code > 125) then
-		return nil, 0
+		return nil, 0, "control frame must be final and <= 125 bytes"
 	end
 
-	return { fin = fin, opcode = opcode, masked = masked, len_code = len_code }, 3
+	return { fin = fin, opcode = opcode, masked = masked, len_code = len_code }, 3, nil
 end
 
 local function parse_payload_length(data, offset, len_code)
 	if len_code < 126 then
-		return len_code, offset
+		return len_code, offset, nil
 	elseif len_code == 126 then
 		if #data < offset + 1 then
-			return nil, 0
+			return nil, 0, nil
 		end
-		return utils.bytes_to_uint16(data:sub(offset, offset + 1)), offset + 2
+		return utils.bytes_to_uint16(data:sub(offset, offset + 1)), offset + 2, nil
 	else
 		if #data < offset + 7 then
-			return nil, 0
+			return nil, 0, nil
 		end
 		local len = utils.bytes_to_uint64(data:sub(offset, offset + 7))
 		if len > 100 * 1024 * 1024 then
-			return nil, 0
+			return nil, 0, "payload length exceeds maximum"
 		end
-		return len, offset + 8
+		return len, offset + 8, nil
 	end
 end
 
@@ -91,37 +97,44 @@ local function read_mask_and_payload(data, offset, length, masked)
 	return payload, mask, offset + length
 end
 
+---Parse a single WebSocket frame from the front of a buffer.
+---@param data string The raw buffer
+---@return table|nil frame The parsed frame, or nil if incomplete/invalid
+---@return number bytes_consumed Number of bytes consumed (0 if no frame parsed)
+---@return string|nil error Protocol-error reason; nil means simply incomplete
 function M.parse_frame(data)
 	if type(data) ~= "string" then
-		return nil, 0
+		return nil, 0, nil
 	end
 
-	local header, pos = parse_header(data)
+	local header, pos, header_err = parse_header(data)
 	if not header then
-		return nil, 0
+		return nil, 0, header_err
 	end
 
-	local length, new_pos = parse_payload_length(data, pos, header.len_code)
+	local length, new_pos, length_err = parse_payload_length(data, pos, header.len_code)
 	if not length then
-		return nil, 0
+		return nil, 0, length_err
 	end
 	pos = new_pos
 
 	local payload, mask, end_pos = read_mask_and_payload(data, pos, length, header.masked)
 	if not payload then
-		return nil, 0
+		return nil, 0, nil
 	end
 
-	if header.opcode == M.OPCODE.TEXT and not utils.is_valid_utf8(payload) then
-		return nil, 0
+	-- Only validate UTF-8 on a final text frame; a fragmented message may split a
+	-- multi-byte codepoint across frames, so partial frames are validated on reassembly.
+	if header.opcode == M.OPCODE.TEXT and header.fin and not utils.is_valid_utf8(payload) then
+		return nil, 0, "invalid UTF-8 in text frame"
 	end
 
 	if header.opcode == M.OPCODE.CLOSE and length > 0 then
 		if length == 1 then
-			return nil, 0
+			return nil, 0, "invalid close frame payload length"
 		end
 		if length > 2 and not utils.is_valid_utf8(payload:sub(3)) then
-			return nil, 0
+			return nil, 0, "invalid UTF-8 in close frame reason"
 		end
 	end
 
@@ -133,7 +146,8 @@ function M.parse_frame(data)
 		mask = mask,
 		payload = payload,
 	},
-		end_pos - 1
+		end_pos - 1,
+		nil
 end
 
 function M.create_frame(opcode, payload, fin, masked)

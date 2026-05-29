@@ -1,0 +1,125 @@
+*claude-transport.txt*    WebSocket/MCP transport for the Claude Code CLI
+
+==============================================================================
+CONTENTS                                            *claude-transport-contents*
+
+  1. Introduction ............ |claude-transport-introduction|
+  2. Requirements ............ |claude-transport-requirements|
+  3. Setup ................... |claude-transport-setup|
+  4. Commands ................ |claude-transport-commands|
+  5. Health .................. |claude-transport-health|
+  6. Lua API ................. |claude-transport-api|
+  7. MCP tools ............... |claude-transport-tools|
+  8. How it works ............ |claude-transport-how-it-works|
+
+==============================================================================
+1. INTRODUCTION                                 *claude-transport-introduction*
+
+claude-transport.nvim is a headless WebSocket transport that implements the
+MCP protocol so a Claude Code CLI session running outside Neovim can connect to
+this instance and read buffers, track selections, and fetch diagnostics.
+
+It is a pure Lua API with no UI.
+
+==============================================================================
+2. REQUIREMENTS                                 *claude-transport-requirements*
+
+  - Neovim 0.10.0+
+  - LuaJIT (ships with Neovim)
+  - OpenSSL (`libcrypto`), used via FFI for the WebSocket handshake (SHA-1)
+
+==============================================================================
+3. SETUP                                               *claude-transport-setup*
+
+>lua
+    require("claude-transport").setup({
+      auto_start = false,                       -- start server on setup
+      port_range = { min = 10000, max = 65535 },-- random port range
+      log_level = "info",                       -- trace|debug|info|warn|error
+      ping_interval = 30000,                    -- WebSocket ping interval (ms)
+      register_default_tools = true,            -- register built-in MCP tools
+    })
+<
+
+==============================================================================
+4. COMMANDS                                         *claude-transport-commands*
+
+                                                      *:ClaudeTransportStart*
+:ClaudeTransportStart     Start the WebSocket server.
+
+                                                      *:ClaudeTransportStop*
+:ClaudeTransportStop      Stop the WebSocket server.
+
+                                                      *:ClaudeTransportStatus*
+:ClaudeTransportStatus    Show server status (port, connection count).
+
+                                                      *:ClaudeTransportSend*
+:[range]ClaudeTransportSend
+                          Send the current line or visual selection of the
+                          current buffer to the connected Claude session as an
+                          `@`-mention.
+
+==============================================================================
+5. HEALTH                                             *claude-transport-health*
+
+Run >
+    :checkhealth claude-transport
+<
+to verify the Neovim version, OpenSSL FFI availability, lock file directory,
+and server status.
+
+==============================================================================
+6. LUA API                                             *claude-transport-api*
+
+>lua
+    local transport = require("claude-transport")
+
+    transport.start()              -- start server, returns (ok, port_or_err)
+    transport.stop()               -- stop server
+    transport.is_running()         -- boolean
+    transport.get_port()           -- port number or nil
+
+    transport.is_connected()       -- true if a Claude client is connected
+    transport.get_connections()    -- list of connected client info
+
+    transport.broadcast(method, params)
+    transport.send(connection_id, method, params)
+    transport.notify_at_mention(file, start_line, end_line)
+    transport.send_at_mention(start_line, end_line) -- current buffer @-mention
+
+    transport.register_tool(name, schema, handler)  -- handler is synchronous
+    transport.unregister_tool(name)
+    transport.get_registered_tools()
+
+    transport.on("connect", function(conn) end)
+    transport.on("disconnect", function(conn) end)
+    transport.on("message", function(conn, msg) end)
+<
+
+==============================================================================
+7. MCP TOOLS                                           *claude-transport-tools*
+
+Registered by default and exposed to Claude Code:
+
+  checkDocumentDirty    Check if a buffer has unsaved changes
+  getWorkspaceFolders   Workspace folders (CWD + LSP workspace folders)
+  getDiagnostics        LSP diagnostics for a file
+  getOpenEditors        List currently open buffers
+  getCurrentSelection   Current visual selection or cursor position
+  getLatestSelection    Most recent selection (persists after visual mode)
+  openFile              Open a file in a buffer
+  saveDocument          Save a buffer to disk
+
+==============================================================================
+8. HOW IT WORKS                                 *claude-transport-how-it-works*
+
+  1. On start, the plugin binds a TCP server to a random localhost port.
+  2. A lock file is written to `~/.claude/ide/<port>.lock` with an auth token.
+  3. The Claude Code CLI discovers the lock file and connects via WebSocket.
+     Run `/ide` in an external session to pick this Neovim instance.
+  4. Communication uses JSON-RPC 2.0 over MCP (protocol `2024-11-05`).
+  5. Selection autocmds keep Claude aware of your cursor/visual selection.
+
+Stale lock files from crashed Neovim instances are pruned on start.
+
+vim:tw=78:ts=8:ft=help:norl:

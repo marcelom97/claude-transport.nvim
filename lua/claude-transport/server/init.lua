@@ -8,8 +8,6 @@ local PLUGIN_VERSION = "0.1.0"
 
 local M = {}
 
-local deferred_responses = {}
-
 M.state = {
 	server = nil,
 	port = nil,
@@ -82,8 +80,6 @@ function M.stop()
 
 	tcp_server.stop_server(M.state.server)
 
-	deferred_responses = {}
-
 	M.state.server = nil
 	M.state.port = nil
 	M.state.auth_token = nil
@@ -138,17 +134,6 @@ function M._handle_request(client, request)
 
 	local success, result, error_data = pcall(handler, client, params)
 	if success then
-		if result and result._deferred then
-			M._setup_deferred_response({
-				client = result.client,
-				id = id,
-				coroutine = result.coroutine,
-				method = method,
-				params = result.params,
-			})
-			return
-		end
-
 		if error_data then
 			M.send_response(client, id, nil, error_data)
 		else
@@ -163,26 +148,6 @@ function M._handle_request(client, request)
 	end
 end
 
-function M._setup_deferred_response(deferred_info)
-	local co = deferred_info.coroutine
-
-	local response_sender = function(result)
-		if result and result.content then
-			M.send_response(deferred_info.client, deferred_info.id, result, nil)
-		elseif result and result.error then
-			M.send_response(deferred_info.client, deferred_info.id, nil, result.error)
-		else
-			M.send_response(deferred_info.client, deferred_info.id, nil, {
-				code = -32603,
-				message = "Internal error",
-				data = "Deferred response completed with unexpected format",
-			})
-		end
-	end
-
-	deferred_responses[tostring(co)] = response_sender
-end
-
 function M._handle_notification(client, notification)
 	local method = notification.method
 	local params = notification.params or {}
@@ -195,8 +160,11 @@ end
 function M.register_handlers()
 	M.state.handlers = {
 		["initialize"] = function(client, params)
+			local requested = params and params.protocolVersion
+			local protocol_version = (type(requested) == "string" and requested ~= "") and requested
+				or MCP_PROTOCOL_VERSION
 			return {
-				protocolVersion = MCP_PROTOCOL_VERSION,
+				protocolVersion = protocol_version,
 				capabilities = {
 					logging = vim.empty_dict(),
 					prompts = { listChanged = true },
@@ -218,9 +186,6 @@ function M.register_handlers()
 		end,
 		["tools/call"] = function(client, params)
 			local result_or_error_table = tools.handle_invoke(client, params)
-			if result_or_error_table and result_or_error_table._deferred then
-				return result_or_error_table
-			end
 			if result_or_error_table.error then
 				return nil, result_or_error_table.error
 			elseif result_or_error_table.result then
