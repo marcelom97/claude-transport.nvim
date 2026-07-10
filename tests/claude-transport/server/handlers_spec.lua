@@ -22,3 +22,21 @@ describe("initialize handler", function()
 		assert.equals("claude-transport-neovim", res.serverInfo.name)
 	end)
 end)
+
+describe("_handle_message", function()
+	it("responds -32600 instead of crashing on a JSON scalar message", function()
+		local sent
+		local orig = server.send_response
+		server.send_response = function(_, id, result, error_data)
+			sent = { id = id, result = result, error_data = error_data }
+			return true
+		end
+		local ok = pcall(server._handle_message, { id = "test-client" }, "42")
+		server.send_response = orig
+
+		assert.is_true(ok)
+		assert.is_table(sent)
+		assert.is_table(sent.error_data)
+		assert.equals(-32600, sent.error_data.code)
+	end)
+end)

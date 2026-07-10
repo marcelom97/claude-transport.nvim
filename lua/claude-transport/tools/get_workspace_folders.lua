@@ -20,7 +20,7 @@ local function handler(params)
 	for _, path in ipairs(paths) do
 		table.insert(folders, {
 			name = vim.fn.fnamemodify(path, ":t"),
-			uri = "file://" .. path,
+			uri = vim.uri_from_fname(path),
 			path = path,
 		})
 	end
@@ -35,7 +35,7 @@ local function handler(params)
 					success = true,
 					folders = folders,
 					rootPath = root_path,
-				}, { indent = 2 }),
+				}),
 			},
 		},
 	}

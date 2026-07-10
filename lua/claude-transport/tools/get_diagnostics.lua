@@ -50,7 +50,7 @@ local function handler(params)
 		local filepath = vim.startswith(uri, "file://") and vim.uri_to_fname(uri) or uri
 
 		-- Get buffer number for the specific file
-		local bufnr = vim.fn.bufnr(filepath)
+		local bufnr = require("claude-transport.tools.util").find_buffer(filepath)
 		if bufnr == -1 then
 			-- File is not open in any buffer, throw an error
 			logger.debug("File buffer must be open to get diagnostics: " .. filepath)

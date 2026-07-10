@@ -50,7 +50,7 @@ local function handle_control_frame(parsed_frame, client, on_close)
 				reason = parsed_frame.payload:sub(3)
 			end
 		end
-		if client.state == "connected" then
+		if client.state == "connected" and not client.tcp_handle:is_closing() then
 			client.tcp_handle:write(frame.create_close_frame(code, reason))
 			client.state = "closing"
 		end
@@ -58,7 +58,9 @@ local function handle_control_frame(parsed_frame, client, on_close)
 			on_close(client, code, reason)
 		end)
 	elseif parsed_frame.opcode == frame.OPCODE.PING then
-		client.tcp_handle:write(frame.create_pong_frame(parsed_frame.payload))
+		if not client.tcp_handle:is_closing() then
+			client.tcp_handle:write(frame.create_pong_frame(parsed_frame.payload))
+		end
 	elseif parsed_frame.opcode == frame.OPCODE.PONG then
 		client.last_pong = vim.loop.now()
 	end
@@ -212,15 +214,21 @@ function M.close_client(client, code, reason)
 	code = code or 1000
 	reason = reason or ""
 
-	if client.handshake_complete then
+	if client.handshake_complete and not client.tcp_handle:is_closing() then
 		local close_frame = frame.create_close_frame(code, reason)
 		client.tcp_handle:write(close_frame, function()
 			client.state = "closed"
-			client.tcp_handle:close()
+			-- The handle may already have been closed by a disconnect path
+			-- while this write was in flight; closing twice crashes libuv.
+			if not client.tcp_handle:is_closing() then
+				client.tcp_handle:close()
+			end
 		end)
 	else
 		client.state = "closed"
-		client.tcp_handle:close()
+		if not client.tcp_handle:is_closing() then
+			client.tcp_handle:close()
+		end
 	end
 
 	client.state = "closing"

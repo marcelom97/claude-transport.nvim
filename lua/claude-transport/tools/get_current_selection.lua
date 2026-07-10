@@ -14,7 +14,7 @@ local schema = {
 ---@param error_context string A description of what failed for error messages
 ---@return string The JSON-encoded string
 local function safe_json_encode(data, error_context)
-	local ok, encoded = pcall(vim.json.encode, data, { indent = 2 })
+	local ok, encoded = pcall(vim.json.encode, data)
 	if not ok then
 		error({
 			code = -32000,
@@ -63,7 +63,7 @@ local function handler(params)
 			success = true,
 			text = "",
 			filePath = buf_name,
-			fileUrl = "file://" .. buf_name,
+			fileUrl = vim.uri_from_fname(buf_name),
 			selection = {
 				start = { line = 0, character = 0 },
 				["end"] = { line = 0, character = 0 },

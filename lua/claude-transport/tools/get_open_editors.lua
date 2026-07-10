@@ -68,7 +68,7 @@ local function handler(params)
 
 				-- Build tab object with all VS Code fields
 				local tab = {
-					uri = "file://" .. file_path,
+					uri = vim.uri_from_fname(file_path),
 					isActive = bufnr == current_buf,
 					isPinned = false, -- Neovim doesn't have pinned tabs
 					isPreview = false, -- Neovim doesn't have preview tabs
@@ -105,7 +105,7 @@ local function handler(params)
 		content = {
 			{
 				type = "text",
-				text = vim.json.encode({ tabs = tabs }, { indent = 2 }),
+				text = vim.json.encode({ tabs = tabs }),
 			},
 		},
 	}

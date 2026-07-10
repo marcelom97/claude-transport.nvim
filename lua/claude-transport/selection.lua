@@ -29,7 +29,10 @@ function M.disable()
 	M.state.latest_selection = nil
 	M.server = nil
 	if M.state.debounce_timer then
-		vim.loop.timer_stop(M.state.debounce_timer)
+		M.state.debounce_timer:stop()
+		if not M.state.debounce_timer:is_closing() then
+			M.state.debounce_timer:close()
+		end
 		M.state.debounce_timer = nil
 	end
 	if M.state.demotion_timer then
@@ -53,13 +56,22 @@ function M._clear_autocommands()
 	vim.api.nvim_clear_autocmds({ group = "ClaudeTransportSelection" })
 end
 
-function M.debounce_update()
-	if M.state.debounce_timer then
-		vim.loop.timer_stop(M.state.debounce_timer)
-	end
-	M.state.debounce_timer = vim.defer_fn(function()
-		M.update_selection()
+local function discard_debounce_timer()
+	local t = M.state.debounce_timer
+	if t then
+		t:stop()
+		if not t:is_closing() then
+			t:close()
+		end
 		M.state.debounce_timer = nil
+	end
+end
+
+function M.debounce_update()
+	discard_debounce_timer()
+	M.state.debounce_timer = vim.defer_fn(function()
+		M.state.debounce_timer = nil
+		M.update_selection()
 	end, M.state.debounce_ms)
 end
 
@@ -174,6 +186,36 @@ function M._handle_demotion(original_bufnr)
 	end
 end
 
+---Convert a 0-based byte column to a 0-based UTF-16 code-unit offset (LSP semantics).
+---@param line string|nil The line the column refers to
+---@param byte_col number 0-based byte offset into the line
+---@return number utf16_col
+local function utf16_col(line, byte_col)
+	if not line or byte_col <= 0 then
+		return 0
+	end
+	local idx = math.min(byte_col, #line)
+	-- Neovim 0.11+ signature
+	local ok, res = pcall(vim.str_utfindex, line, "utf-16", idx, false)
+	if ok and type(res) == "number" then
+		return res
+	end
+	-- Neovim 0.10 signature: returns (utf32, utf16)
+	local ok2, _, u16 = pcall(vim.str_utfindex, line, idx)
+	if ok2 and type(u16) == "number" then
+		return u16
+	end
+	return byte_col
+end
+
+local function file_url(file_path)
+	if not file_path or file_path == "" then
+		return ""
+	end
+	local ok, uri = pcall(vim.uri_from_fname, file_path)
+	return ok and uri or ("file://" .. file_path)
+end
+
 local function get_selection_coords()
 	local anchor = vim.fn.getpos("v")
 	local cursor = vim.api.nvim_win_get_cursor(0)
@@ -215,8 +257,19 @@ function M.get_visual_selection()
 	if vmode == "V" then
 		text = table.concat(lines, "\n")
 		lsp_start_char = 0
-		lsp_end_char = #lines[#lines]
-	elseif vmode == "v" or vmode == "\22" then
+		lsp_end_char = utf16_col(lines[#lines], #lines[#lines])
+	elseif vmode == "\22" then
+		-- Visual block: extract the rectangular column range from every line.
+		local c1 = math.min(s.col, e.col)
+		local c2 = math.max(s.col, e.col)
+		local parts = {}
+		for i = 1, #lines do
+			parts[i] = string.sub(lines[i], c1, c2)
+		end
+		text = table.concat(parts, "\n")
+		lsp_start_char = utf16_col(lines[1], c1 - 1)
+		lsp_end_char = utf16_col(lines[#lines], c2)
+	elseif vmode == "v" then
 		if s.lnum == e.lnum then
 			text = lines[1] and string.sub(lines[1], s.col, e.col)
 		else
@@ -230,8 +283,8 @@ function M.get_visual_selection()
 		if not text then
 			return nil
 		end
-		lsp_start_char = s.col - 1
-		lsp_end_char = e.col
+		lsp_start_char = utf16_col(lines[1], s.col - 1)
+		lsp_end_char = utf16_col(lines[#lines], e.col)
 	else
 		return nil
 	end
@@ -239,7 +292,7 @@ function M.get_visual_selection()
 	return {
 		text = text or "",
 		filePath = file_path,
-		fileUrl = "file://" .. file_path,
+		fileUrl = file_url(file_path),
 		selection = {
 			start = { line = s.lnum - 1, character = lsp_start_char },
 			["end"] = { line = e.lnum - 1, character = lsp_end_char },
@@ -250,14 +303,17 @@ end
 
 function M.get_cursor_position()
 	local pos = vim.api.nvim_win_get_cursor(0)
-	local file_path = vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+	local bufnr = vim.api.nvim_get_current_buf()
+	local file_path = vim.api.nvim_buf_get_name(bufnr)
+	local line = vim.api.nvim_buf_get_lines(bufnr, pos[1] - 1, pos[1], false)[1]
+	local character = utf16_col(line, pos[2])
 	return {
 		text = "",
 		filePath = file_path,
-		fileUrl = "file://" .. file_path,
+		fileUrl = file_url(file_path),
 		selection = {
-			start = { line = pos[1] - 1, character = pos[2] },
-			["end"] = { line = pos[1] - 1, character = pos[2] },
+			start = { line = pos[1] - 1, character = character },
+			["end"] = { line = pos[1] - 1, character = character },
 			isEmpty = true,
 		},
 	}

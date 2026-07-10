@@ -14,6 +14,10 @@ local function make_handle()
 		self.closed = true
 	end
 
+	function h:is_closing()
+		return self.closed
+	end
+
 	return h
 end
 
@@ -88,6 +92,39 @@ describe("client process_data (post-handshake)", function()
 		end, nil)
 		assert.is_true(err_called)
 		assert.is_true(handle.closed)
+	end)
+
+	it("does not close the tcp handle twice when a pending close write completes after disconnect", function()
+		local pending = {}
+		local h = { close_count = 0 }
+		function h:write(_, cb)
+			if cb then
+				table.insert(pending, cb)
+			end
+		end
+		function h:close()
+			self.close_count = self.close_count + 1
+		end
+		function h:is_closing()
+			return self.close_count > 0
+		end
+
+		local client = client_mod.create_client(h)
+		client.handshake_complete = true
+		client.state = "connected"
+
+		-- Ping-timeout path: close_client queues an async close-frame write...
+		client_mod.close_client(client, 1006, "Connection timeout")
+		-- ...then _disconnect_client closes the handle synchronously...
+		if not h:is_closing() then
+			h:close()
+		end
+		-- ...and later the queued write callback fires.
+		for _, cb in ipairs(pending) do
+			cb(nil)
+		end
+
+		assert.equals(1, h.close_count)
 	end)
 
 	it("buffers a partial frame until the rest arrives", function()

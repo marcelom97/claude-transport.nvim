@@ -25,7 +25,7 @@ local function handler(params)
 		error({ code = -32602, message = "Invalid params", data = "Missing filePath parameter" })
 	end
 
-	local bufnr = vim.fn.bufnr(params.filePath)
+	local bufnr = require("claude-transport.tools.util").find_buffer(params.filePath)
 
 	if bufnr == -1 then
 		-- Return success: false when document not open, matching VS Code behavior
@@ -36,7 +36,7 @@ local function handler(params)
 					text = vim.json.encode({
 						success = false,
 						message = "Document not open: " .. params.filePath,
-					}, { indent = 2 }),
+					}),
 				},
 			},
 		}
@@ -55,7 +55,7 @@ local function handler(params)
 					filePath = params.filePath,
 					isDirty = is_dirty,
 					isUntitled = is_untitled,
-				}, { indent = 2 }),
+				}),
 			},
 		},
 	}

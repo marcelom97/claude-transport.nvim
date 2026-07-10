@@ -29,7 +29,7 @@ local function handler(params)
 		})
 	end
 
-	local bufnr = vim.fn.bufnr(params.filePath)
+	local bufnr = require("claude-transport.tools.util").find_buffer(params.filePath)
 
 	if bufnr == -1 then
 		-- Return failure when document not open, matching VS Code behavior
@@ -40,7 +40,7 @@ local function handler(params)
 					text = vim.json.encode({
 						success = false,
 						message = "Document not open: " .. params.filePath,
-					}, { indent = 2 }),
+					}),
 				},
 			},
 		}
@@ -59,7 +59,7 @@ local function handler(params)
 						success = false,
 						message = "Failed to save file: " .. tostring(err),
 						filePath = params.filePath,
-					}, { indent = 2 }),
+					}),
 				},
 			},
 		}
@@ -75,7 +75,7 @@ local function handler(params)
 					filePath = params.filePath,
 					saved = true,
 					message = "Document saved successfully",
-				}, { indent = 2 }),
+				}),
 			},
 		},
 	}

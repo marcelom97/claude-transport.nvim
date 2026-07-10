@@ -107,7 +107,9 @@ local function handler(params)
 		error({ code = -32602, message = "Invalid params", data = "Missing filePath parameter" })
 	end
 
-	local file_path = vim.fn.expand(params.filePath)
+	-- fnamemodify(":p") resolves relative paths and "~" without expand()'s
+	-- special treatment of "%", "#", and wildcards, which are valid in filenames.
+	local file_path = vim.fn.fnamemodify(params.filePath, ":p")
 
 	if vim.fn.filereadable(file_path) == 0 then
 		-- Using a generic error code for tool-specific operational errors
@@ -160,15 +162,14 @@ local function handler(params)
 
 	-- Handle text selection by line numbers
 	if params.startLine or params.endLine then
-		local start_line = params.startLine or 1
-		local end_line = params.endLine or start_line
+		local line_count = vim.api.nvim_buf_line_count(0)
+		local start_line = math.max(1, math.min(params.startLine or 1, line_count))
+		local end_line = math.max(start_line, math.min(params.endLine or start_line, line_count))
 
-		-- Convert to 0-based indexing for vim API
-		local start_pos = { start_line - 1, 0 }
-		local end_pos = { end_line - 1, -1 } -- -1 means end of line
-
-		vim.api.nvim_buf_set_mark(0, "<", start_pos[1], start_pos[2], {})
-		vim.api.nvim_buf_set_mark(0, ">", end_pos[1], end_pos[2], {})
+		-- Marks are (1,0)-indexed: 1-based line, 0-based column
+		local end_line_text = vim.api.nvim_buf_get_lines(0, end_line - 1, end_line, false)[1] or ""
+		vim.api.nvim_buf_set_mark(0, "<", start_line, 0, {})
+		vim.api.nvim_buf_set_mark(0, ">", end_line, math.max(0, #end_line_text - 1), {})
 		vim.cmd("normal! gv")
 
 		message = "Opened file and selected lines " .. start_line .. " to " .. end_line
@@ -194,10 +195,16 @@ local function handler(params)
 		if start_line_idx then
 			-- Find end text if provided
 			if params.endText then
+				-- lines is 1-based, start_line_idx is 0-based, so this loop begins
+				-- on the start line itself; search after the startText match there.
 				for line_idx = start_line_idx + 1, #lines do
-					local line = lines[line_idx] -- Access current line directly
+					local line = lines[line_idx]
 					if line then
-						local col_idx = string.find(line, params.endText, 1, true)
+						local init = 1
+						if line_idx == start_line_idx + 1 then
+							init = start_col_idx + string.len(params.startText) + 1
+						end
+						local col_idx = string.find(line, params.endText, init, true)
 						if col_idx then
 							end_line_idx = line_idx
 							end_col_idx = col_idx + string.len(params.endText) - 1
@@ -232,10 +239,10 @@ local function handler(params)
 				message = 'Opened file and selected text "' .. params.startText .. '"'
 			end
 
-			-- Apply the selection
+			-- Apply the selection; marks are (1,0)-indexed
 			vim.api.nvim_win_set_cursor(0, { start_line_idx + 1, start_col_idx })
-			vim.api.nvim_buf_set_mark(0, "<", start_line_idx, start_col_idx, {})
-			vim.api.nvim_buf_set_mark(0, ">", end_line_idx, end_col_idx, {})
+			vim.api.nvim_buf_set_mark(0, "<", start_line_idx + 1, start_col_idx, {})
+			vim.api.nvim_buf_set_mark(0, ">", end_line_idx, math.max(0, end_col_idx - 1), {})
 			vim.cmd("normal! gv")
 			vim.cmd("normal! zz") -- Center the selection in the window
 		else
@@ -268,7 +275,7 @@ local function handler(params)
 			content = {
 				{
 					type = "text",
-					text = vim.json.encode(detailed_info, { indent = 2 }),
+					text = vim.json.encode(detailed_info),
 				},
 			},
 		}
