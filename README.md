@@ -28,6 +28,7 @@ require("claude-transport").setup({
   port_range = { min = 10000, max = 65535 }, -- random port range
   log_level = "info",             -- trace | debug | info | warn | error
   ping_interval = 30000,          -- WebSocket ping interval in ms
+  handshake_timeout_ms = 10000,   -- drop connections that never complete a handshake
   register_default_tools = true,  -- register built-in MCP tools
 })
 ```

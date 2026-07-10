@@ -5,6 +5,7 @@ M.defaults = {
 	auto_start = false,
 	log_level = "info",
 	ping_interval = 30000,
+	handshake_timeout_ms = 10000,
 	register_default_tools = true,
 }
 
@@ -34,6 +35,11 @@ function M.validate(config)
 	assert(
 		type(config.ping_interval) == "number" and config.ping_interval > 0,
 		"ping_interval must be a positive number"
+	)
+
+	assert(
+		type(config.handshake_timeout_ms) == "number" and config.handshake_timeout_ms > 0,
+		"handshake_timeout_ms must be a positive number"
 	)
 
 	assert(type(config.register_default_tools) == "boolean", "register_default_tools must be a boolean")

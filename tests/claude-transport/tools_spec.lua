@@ -94,6 +94,17 @@ describe("tools", function()
 		end)
 	end)
 
+	describe("getLatestSelection", function()
+		it("returns valid JSON when no selection exists", function()
+			require("claude-transport.selection").state.latest_selection = nil
+			local get_latest = require("claude-transport.tools.get_latest_selection")
+			local res = get_latest.handler({})
+			local ok, decoded = pcall(vim.json.decode, res.content[1].text)
+			assert.is_true(ok)
+			assert.is_false(decoded.success)
+		end)
+	end)
+
 	describe("getWorkspaceFolders", function()
 		it("emits percent-encoded file URIs", function()
 			local spaced = dir .. "/work space"
