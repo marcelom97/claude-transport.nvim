@@ -25,9 +25,14 @@ function M.check()
 
 	local lockfile = require("claude-transport.lockfile")
 	local dir = lockfile.lock_dir
-	pcall(vim.fn.mkdir, dir, "p")
-	if vim.fn.filewritable(dir) == 2 then
+	if vim.fn.isdirectory(dir) == 0 then
+		ok("Lock file directory not created yet (created on first start): " .. dir)
+	elseif vim.fn.filewritable(dir) == 2 then
 		ok("Lock file directory writable: " .. dir)
+		local locks = vim.fn.glob(dir .. "/*.lock", true, true)
+		if #locks > 0 then
+			ok(#locks .. " lock file(s) present (stale ones are pruned on start)")
+		end
 	else
 		warn("Lock file directory not writable: " .. dir)
 	end

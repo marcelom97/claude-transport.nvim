@@ -269,10 +269,16 @@ function M.cleanup_stale()
 			local content = file:read("*all")
 			file:close()
 			local ok, data = pcall(vim.json.decode, content or "")
-			if ok and type(data) == "table" and type(data.pid) == "number" and not M.is_pid_alive(data.pid) then
-				if pcall(os.remove, path) then
-					removed[#removed + 1] = path
-				end
+			-- Corrupt or pid-less lock files are useless to any client and would
+			-- otherwise accumulate forever; treat them as stale too.
+			local stale
+			if not ok or type(data) ~= "table" or type(data.pid) ~= "number" then
+				stale = true
+			else
+				stale = not M.is_pid_alive(data.pid)
+			end
+			if stale and pcall(os.remove, path) then
+				removed[#removed + 1] = path
 			end
 		end
 	end

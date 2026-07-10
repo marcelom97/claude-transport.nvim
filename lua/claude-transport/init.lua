@@ -136,6 +136,8 @@ function M.stop()
 	local selection = require("claude-transport.selection")
 	selection.disable()
 
+	pcall(vim.api.nvim_del_augroup_by_name, "ClaudeTransportShutdown")
+
 	local lockfile = require("claude-transport.lockfile")
 	lockfile.remove(M.state.port)
 

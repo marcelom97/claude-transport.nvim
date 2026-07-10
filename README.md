@@ -32,6 +32,8 @@ require("claude-transport").setup({
 })
 ```
 
+`port_range` also accepts the array form `{ 10000, 65535 }`.
+
 ## Commands
 
 | Command | Description |
@@ -78,6 +80,7 @@ transport.get_connections()    -- list of connected client info
 transport.broadcast(method, params)           -- send to all clients
 transport.send(connection_id, method, params) -- send to specific client
 transport.notify_at_mention(file, start_line, end_line) -- file mention
+transport.send_at_mention(start_line, end_line) -- mention current buffer's range
 
 -- Tools
 transport.register_tool(name, schema, handler)
@@ -102,6 +105,15 @@ To connect a Claude Code session running in a separate terminal, run `/ide` insi
 that session and pick the Neovim instance.
 
 Stale lock files from crashed Neovim instances are pruned automatically on start.
+
+## Development
+
+```sh
+make test    # run the plenary test suite
+make lint    # luacheck + stylua --check
+make format  # stylua
+make smoke   # start and stop a real server headlessly
+```
 
 ## License
 

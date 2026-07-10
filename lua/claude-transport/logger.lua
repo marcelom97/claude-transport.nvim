@@ -70,9 +70,7 @@ local function log(level, component, message_parts)
 		end
 	end
 
-	-- Wrap all vim.notify and nvim_echo calls in vim.schedule to avoid
-	-- "nvim_echo must not be called in a fast event context" errors
-	vim.schedule(function()
+	local function emit()
 		if level == M.levels.ERROR then
 			vim.notify(prefix .. " " .. message, vim.log.levels.ERROR, { title = "ClaudeTransport Error" })
 		elseif level == M.levels.WARN then
@@ -82,7 +80,15 @@ local function log(level, component, message_parts)
 			-- to make them appear in :messages
 			vim.api.nvim_echo({ { prefix .. " " .. message, "Normal" } }, true, {})
 		end
-	end)
+	end
+
+	-- nvim_echo/notify are not allowed in fast event contexts (libuv callbacks);
+	-- deferring unconditionally would reorder messages and drop logs at shutdown.
+	if vim.in_fast_event() then
+		vim.schedule(emit)
+	else
+		emit()
+	end
 end
 
 ---Error level logging

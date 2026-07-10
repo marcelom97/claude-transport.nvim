@@ -7,15 +7,17 @@ on:
 
 jobs:
   test:
-    name: test (nvim ${{ matrix.neovim }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, nvim ${{ matrix.neovim }})
+    runs-on: ${{ matrix.os }}
     # nightly tracks unreleased Neovim and may break for reasons unrelated to
     # this plugin, so it is allowed to fail without failing the workflow.
     continue-on-error: ${{ matrix.neovim == 'nightly' }}
     strategy:
       fail-fast: false
       matrix:
-        neovim: [stable, nightly]
+        os: [ubuntu-latest, macos-latest]
+        # v0.10.0 is the documented minimum supported version
+        neovim: [v0.10.0, stable, nightly]
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +41,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: latest
-          args: --check lua/ tests/
+          args: --check lua/ tests/ scripts/
 
       - name: Set up Lua
         uses: leafo/gh-actions-lua@v11
@@ -53,4 +55,4 @@ jobs:
         run: luarocks install luacheck
 
       - name: Lint (luacheck)
-        run: luacheck lua tests
+        run: luacheck lua tests scripts
