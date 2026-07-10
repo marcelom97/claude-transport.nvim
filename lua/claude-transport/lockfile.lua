@@ -13,45 +13,38 @@ end
 
 M.lock_dir = get_lock_dir()
 
--- Track if random seed has been initialized
-local random_initialized = false
+local bit = require("bit")
 
----Generate a random UUID for authentication
+---Read cryptographically secure random bytes from the OS
+---@param n number Number of bytes
+---@return string bytes
+local function random_bytes(n)
+	-- libuv CSPRNG (OS entropy pool)
+	local ok, bytes = pcall(vim.loop.random, n)
+	if ok and type(bytes) == "string" and #bytes == n then
+		return bytes
+	end
+
+	local f = io.open("/dev/urandom", "rb")
+	if f then
+		local data = f:read(n)
+		f:close()
+		if data and #data == n then
+			return data
+		end
+	end
+
+	error("No cryptographically secure random source available")
+end
+
+---Generate a random UUID v4 for authentication from OS entropy
 ---@return string uuid A randomly generated UUID string
 local function generate_auth_token()
-	-- Initialize random seed only once
-	if not random_initialized then
-		local seed = os.time() + vim.fn.getpid()
-		-- Add more entropy if available
-		if vim.loop and vim.loop.hrtime then
-			seed = seed + (vim.loop.hrtime() % 1000000)
-		end
-		math.randomseed(seed)
-
-		-- Call math.random a few times to "warm up" the generator
-		for _ = 1, 10 do
-			math.random()
-		end
-		random_initialized = true
-	end
-
-	-- Generate UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-	local template = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx"
-	local uuid = template:gsub("[xy]", function(c)
-		local v = (c == "x") and math.random(0, 15) or math.random(8, 11)
-		return string.format("%x", v)
-	end)
-
-	-- Validate generated UUID format
-	if not uuid:match("^[0-9a-f]+-[0-9a-f]+-[0-9a-f]+-[0-9a-f]+-[0-9a-f]+$") then
-		error("Generated invalid UUID format: " .. uuid)
-	end
-
-	if #uuid ~= 36 then
-		error("Generated UUID has invalid length: " .. #uuid .. " (expected 36)")
-	end
-
-	return uuid
+	local b = { random_bytes(16):byte(1, 16) }
+	-- RFC 4122: set version (4) and variant (10xx) bits
+	b[7] = bit.bor(bit.band(b[7], 0x0f), 0x40)
+	b[9] = bit.bor(bit.band(b[9], 0x3f), 0x80)
+	return string.format("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", unpack(b))
 end
 
 ---Generate a new authentication token
@@ -126,24 +119,26 @@ function M.create(port, auth_token)
 		return false, "Failed to encode lock file content: " .. (json_err or "unknown error")
 	end
 
-	local file = io.open(lock_path, "w")
-	if not file then
-		return false, "Failed to create lock file: " .. lock_path
+	-- Write to a temp file created with 0600, then rename into place so the
+	-- token is never observable in a partially-written or world-readable file.
+	local tmp_path = lock_path .. ".tmp"
+	local fd, open_err = vim.loop.fs_open(tmp_path, "w", tonumber("600", 8))
+	if not fd then
+		return false, "Failed to create lock file: " .. (open_err or tmp_path)
 	end
 
-	local write_ok, write_err = pcall(function()
-		file:write(json)
-		file:close()
-	end)
-
-	if not write_ok then
-		pcall(function()
-			file:close()
-		end)
-		return false, "Failed to write lock file: " .. (write_err or "unknown error")
+	local written, write_err = vim.loop.fs_write(fd, json, -1)
+	vim.loop.fs_close(fd)
+	if not written or written < #json then
+		pcall(os.remove, tmp_path)
+		return false, "Failed to write lock file: " .. (write_err or "short write")
 	end
 
-	pcall(vim.loop.fs_chmod, lock_path, tonumber("600", 8))
+	local rename_ok, rename_err = vim.loop.fs_rename(tmp_path, lock_path)
+	if not rename_ok then
+		pcall(os.remove, tmp_path)
+		return false, "Failed to publish lock file: " .. (rename_err or "unknown error")
+	end
 
 	return true, lock_path, auth_token
 end

@@ -21,13 +21,12 @@ function M.start(config, auth_token)
 		return false, "Server already running"
 	end
 
-	M.state.auth_token = auth_token
-
-	if auth_token then
-		logger.debug("server", "Starting WebSocket server with authentication enabled")
-	else
-		logger.debug("server", "Starting WebSocket server WITHOUT authentication (insecure)")
+	if type(auth_token) ~= "string" or #auth_token < 10 then
+		return false, "Refusing to start without a valid auth token"
 	end
+
+	M.state.auth_token = auth_token
+	logger.debug("server", "Starting WebSocket server with authentication enabled")
 
 	M.register_handlers()
 	tools.setup(M)

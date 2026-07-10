@@ -19,6 +19,60 @@ describe("lockfile", function()
 		vim.fn.delete(tmp, "rf")
 	end)
 
+	describe("generate_auth_token", function()
+		it("produces a UUID v4 formatted token", function()
+			local token = lockfile.generate_auth_token()
+			assert.matches("^%x%x%x%x%x%x%x%x%-%x%x%x%x%-4%x%x%x%-[89ab]%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$", token)
+		end)
+
+		it("does not derive tokens from math.random", function()
+			-- If tokens come from math.random, forcing it constant makes them collide.
+			local orig = math.random
+			math.random = function()
+				return 0
+			end
+			local ok, t1, t2 = pcall(function()
+				return lockfile.generate_auth_token(), lockfile.generate_auth_token()
+			end)
+			math.random = orig
+			assert.is_true(ok)
+			assert.is_not.equal(t1, t2)
+		end)
+	end)
+
+	describe("create", function()
+		it("creates the lock file with owner-only permissions", function()
+			local ok, path = lockfile.create(45001)
+			assert.is_true(ok)
+			assert.equals("rw-------", vim.fn.getfperm(path))
+		end)
+
+		it("never opens the final lock path for writing (atomic rename)", function()
+			local final = tmp .. "/45002.lock"
+			local wrote_final = false
+			local orig_open = io.open
+			io.open = function(p, mode) -- luacheck: ignore
+				if p == final and mode and mode:find("w") then
+					wrote_final = true
+				end
+				return orig_open(p, mode)
+			end
+			local ok = lockfile.create(45002)
+			io.open = orig_open -- luacheck: ignore
+			assert.is_true(ok)
+			assert.is_false(wrote_final)
+			local read_ok, token = lockfile.get_auth_token(45002)
+			assert.is_true(read_ok)
+			assert.is_string(token)
+		end)
+
+		it("leaves no temp files behind", function()
+			assert.is_true(lockfile.create(45003))
+			local leftovers = vim.fn.glob(tmp .. "/*.tmp", true, true)
+			assert.equals(0, #leftovers)
+		end)
+	end)
+
 	describe("is_pid_alive", function()
 		it("treats the current process as alive", function()
 			assert.is_true(lockfile.is_pid_alive(vim.fn.getpid()))

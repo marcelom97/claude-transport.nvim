@@ -34,6 +34,18 @@ function M.validate_upgrade_request(request, expected_auth_token)
 		return false, "Invalid Sec-WebSocket-Key format"
 	end
 
+	-- Reject cross-site WebSocket connections. Non-browser clients (Claude Code
+	-- CLI) send no Origin header; browsers always do, so any non-local Origin
+	-- means a web page is trying to reach the server.
+	local origin = headers["origin"]
+	if origin then
+		local host = origin:match("^https?://([^/]+)$")
+		local hostname = host and (host:match("^(.-):%d+$") or host)
+		if hostname ~= "localhost" and hostname ~= "127.0.0.1" and hostname ~= "[::1]" then
+			return false, "Forbidden Origin header: " .. origin
+		end
+	end
+
 	if expected_auth_token then
 		if type(expected_auth_token) ~= "string" or expected_auth_token == "" then
 			return false, "Server configuration error: invalid expected authentication token"
