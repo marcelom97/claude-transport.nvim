@@ -6,6 +6,13 @@ local logger = require("claude-transport.logger")
 
 local M = {}
 
+-- Caps to keep a misbehaving client from exhausting memory. Frame payloads are
+-- separately capped in frame.lua; this bounds handshake buffering and the total
+-- size of a fragmented message across frames.
+M.MAX_HANDSHAKE_BYTES = 8192
+M.MAX_MESSAGE_BYTES = 100 * 1024 * 1024
+M.MAX_WRITE_QUEUE_BYTES = 4 * 1024 * 1024
+
 ---@class WebSocketClient
 ---@field id string Unique client identifier
 ---@field tcp_handle table The vim.loop TCP handle
@@ -41,6 +48,15 @@ local function handle_data_frame(parsed_frame, client, on_message)
 	end)
 end
 
+---RFC 6455 §7.4: 1000-1003 and 1007-1011 are defined, 3000-4999 are
+---registered/private ranges; everything else must not appear on the wire.
+local function is_valid_close_code(code)
+	if code >= 3000 and code <= 4999 then
+		return true
+	end
+	return code == 1000 or code == 1001 or code == 1002 or code == 1003 or (code >= 1007 and code <= 1011)
+end
+
 local function handle_control_frame(parsed_frame, client, on_close)
 	if parsed_frame.opcode == frame.OPCODE.CLOSE then
 		local code, reason = 1000, ""
@@ -48,6 +64,9 @@ local function handle_control_frame(parsed_frame, client, on_close)
 			code = parsed_frame.payload:byte(1) * 256 + parsed_frame.payload:byte(2)
 			if #parsed_frame.payload > 2 then
 				reason = parsed_frame.payload:sub(3)
+			end
+			if not is_valid_close_code(code) then
+				code, reason = 1002, "invalid close code"
 			end
 		end
 		if client.state == "connected" and not client.tcp_handle:is_closing() then
@@ -77,6 +96,12 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 	client.buffer = client.buffer .. data
 
 	if not client.handshake_complete then
+		if #client.buffer > M.MAX_HANDSHAKE_BYTES then
+			client.buffer = ""
+			on_error(client, "Handshake request exceeds " .. M.MAX_HANDSHAKE_BYTES .. " bytes")
+			M.close_client(client, 1009, "handshake request too large")
+			return
+		end
 		local complete, request, remaining = handshake.extract_http_request(client.buffer)
 		if complete and request then
 			local success, response_from_handshake, _ = handshake.process_handshake(request, auth_token)
@@ -115,12 +140,21 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 		return
 	end
 
-	while #client.buffer >= 2 do -- Minimum frame size
-		local parsed_frame, bytes_consumed, parse_err = frame.parse_frame(client.buffer)
+	-- Parse frames at a moving offset and re-slice the buffer once at the end;
+	-- slicing per frame makes a multi-frame read quadratic.
+	local buf = client.buffer
+	local pos = 1
+	local function commit()
+		client.buffer = pos > 1 and buf:sub(pos) or buf
+	end
+
+	while #buf - pos + 1 >= 2 do -- Minimum frame size
+		local parsed_frame, bytes_consumed, parse_err = frame.parse_frame(buf, pos)
 
 		if not parsed_frame then
 			if parse_err then
 				-- Malformed frame: closing beats stalling on an unparseable buffer.
+				commit()
 				on_error(client, "Protocol error: " .. parse_err)
 				M.close_client(client, 1002, parse_err)
 				return
@@ -130,16 +164,18 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 
 		-- RFC 6455 §5.1: every client-to-server frame must be masked.
 		if not parsed_frame.masked then
+			commit()
 			on_error(client, "Protocol error: client frame not masked")
 			M.close_client(client, 1002, "client frame must be masked")
 			return
 		end
 
-		client.buffer = client.buffer:sub(bytes_consumed + 1)
+		pos = pos + bytes_consumed
 
 		local opcode = parsed_frame.opcode
 		if opcode == frame.OPCODE.TEXT or opcode == frame.OPCODE.BINARY then
 			if client.fragment then
+				commit()
 				on_error(client, "Protocol error: new data frame during a fragmented message")
 				M.close_client(client, 1002, "interleaved data frame")
 				return
@@ -147,20 +183,30 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 			if parsed_frame.fin then
 				handle_data_frame(parsed_frame, client, on_message)
 			else
-				client.fragment = { opcode = opcode, parts = { parsed_frame.payload } }
+				client.fragment = { opcode = opcode, parts = { parsed_frame.payload }, size = #parsed_frame.payload }
 			end
 		elseif opcode == frame.OPCODE.CONTINUATION then
 			if not client.fragment then
+				commit()
 				on_error(client, "Protocol error: continuation frame with no message in progress")
 				M.close_client(client, 1002, "unexpected continuation frame")
 				return
 			end
 			client.fragment.parts[#client.fragment.parts + 1] = parsed_frame.payload
+			client.fragment.size = client.fragment.size + #parsed_frame.payload
+			if client.fragment.size > M.MAX_MESSAGE_BYTES then
+				client.fragment = nil
+				commit()
+				on_error(client, "Protocol error: fragmented message exceeds size cap")
+				M.close_client(client, 1009, "message too big")
+				return
+			end
 			if parsed_frame.fin then
 				local message = table.concat(client.fragment.parts)
 				local is_text = client.fragment.opcode == frame.OPCODE.TEXT
 				client.fragment = nil
 				if is_text and not utils.is_valid_utf8(message) then
+					commit()
 					on_error(client, "Protocol error: invalid UTF-8 in fragmented text message")
 					M.close_client(client, 1002, "invalid UTF-8")
 					return
@@ -171,6 +217,8 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 			handle_control_frame(parsed_frame, client, on_close)
 		end
 	end
+
+	commit()
 end
 
 ---Send a text message to a client
@@ -185,8 +233,18 @@ function M.send_message(client, message, callback)
 		return
 	end
 
+	-- Backpressure: libuv buffers writes without bound; a stalled client would
+	-- otherwise accumulate outbound data indefinitely.
+	local handle = client.tcp_handle
+	if handle.get_write_queue_size and handle:get_write_queue_size() > M.MAX_WRITE_QUEUE_BYTES then
+		if callback then
+			callback("Client write queue full")
+		end
+		return
+	end
+
 	local text_frame = frame.create_text_frame(message)
-	client.tcp_handle:write(text_frame, callback)
+	handle:write(text_frame, callback)
 end
 
 ---Send a ping to a client

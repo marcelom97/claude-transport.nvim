@@ -79,35 +79,51 @@ function M.parse_http_headers(request)
 	return headers
 end
 
+---Strict UTF-8 validation (RFC 3629): rejects overlong encodings, UTF-16
+---surrogates (U+D800-U+DFFF), codepoints above U+10FFFF, and stray bytes.
+---The first continuation byte's valid range depends on the lead byte; the
+---rest must be 0x80-0xBF.
 function M.is_valid_utf8(str)
-	local i = 1
-	while i <= #str do
-		local byte = str:byte(i)
-		local char_len = 1
-
-		if byte >= 0x80 then
-			if byte >= 0xF0 then
-				char_len = 4
-			elseif byte >= 0xE0 then
-				char_len = 3
-			elseif byte >= 0xC0 then
-				char_len = 2
+	local i, n = 1, #str
+	while i <= n do
+		local b = str:byte(i)
+		if b <= 0x7F then
+			i = i + 1
+		else
+			local len, first_lo, first_hi
+			if b >= 0xC2 and b <= 0xDF then
+				len, first_lo, first_hi = 2, 0x80, 0xBF
+			elseif b == 0xE0 then
+				len, first_lo, first_hi = 3, 0xA0, 0xBF
+			elseif (b >= 0xE1 and b <= 0xEC) or b == 0xEE or b == 0xEF then
+				len, first_lo, first_hi = 3, 0x80, 0xBF
+			elseif b == 0xED then
+				len, first_lo, first_hi = 3, 0x80, 0x9F
+			elseif b == 0xF0 then
+				len, first_lo, first_hi = 4, 0x90, 0xBF
+			elseif b >= 0xF1 and b <= 0xF3 then
+				len, first_lo, first_hi = 4, 0x80, 0xBF
+			elseif b == 0xF4 then
+				len, first_lo, first_hi = 4, 0x80, 0x8F
 			else
 				return false
 			end
 
-			for j = 1, char_len - 1 do
-				if i + j > #str then
-					return false
-				end
-				local cont = str:byte(i + j)
-				if cont < 0x80 or cont >= 0xC0 then
+			if i + len - 1 > n then
+				return false
+			end
+			local c1 = str:byte(i + 1)
+			if c1 < first_lo or c1 > first_hi then
+				return false
+			end
+			for j = 2, len - 1 do
+				local c = str:byte(i + j)
+				if c < 0x80 or c > 0xBF then
 					return false
 				end
 			end
+			i = i + len
 		end
-
-		i = i + char_len
 	end
 	return true
 end

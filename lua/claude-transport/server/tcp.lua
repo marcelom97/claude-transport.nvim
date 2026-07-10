@@ -3,44 +3,42 @@ local client_manager = require("claude-transport.server.client")
 local M = {}
 
 local MAX_PORT_ATTEMPTS = 50
+local DEFAULT_HANDSHAKE_TIMEOUT_MS = 10000
 
-function M.find_available_port(min_port, max_port)
-	if min_port > max_port then
-		return nil
+-- Unseeded, LuaJIT's math.random yields the same port sequence in every
+-- Neovim instance, so concurrent instances all race for the same ports.
+local rng_seeded = false
+local function seed_rng()
+	if rng_seeded then
+		return
 	end
-
-	local range = max_port - min_port + 1
-
-	for _ = 1, MAX_PORT_ATTEMPTS do
-		local port = min_port + math.random(0, range - 1)
-		local test = vim.loop.new_tcp()
-		if test then
-			local ok = test:bind("127.0.0.1", port)
-			test:close()
-			if ok then
-				return port
-			end
+	rng_seeded = true
+	local seed
+	local ok, bytes = pcall(vim.loop.random, 4)
+	if ok and type(bytes) == "string" and #bytes == 4 then
+		seed = 0
+		for i = 1, 4 do
+			seed = seed * 256 + bytes:byte(i)
 		end
+	else
+		seed = (vim.loop.hrtime() + vim.fn.getpid()) % 2147483647
 	end
-
-	return nil
+	math.randomseed(seed)
 end
 
 function M.create_server(config, callbacks, auth_token)
-	local port = M.find_available_port(config.port_range.min, config.port_range.max)
-	if not port then
-		return nil, "No available ports in range " .. config.port_range.min .. "-" .. config.port_range.max
-	end
+	seed_rng()
 
-	local tcp_server = vim.loop.new_tcp()
-	if not tcp_server then
-		return nil, "Failed to create TCP server"
+	local min_port, max_port = config.port_range.min, config.port_range.max
+	if min_port > max_port then
+		return nil, "Invalid port range " .. min_port .. "-" .. max_port
 	end
 
 	local server = {
-		server = tcp_server,
-		port = port,
+		server = nil,
+		port = nil,
 		auth_token = auth_token,
+		handshake_timeout_ms = config.handshake_timeout_ms or DEFAULT_HANDSHAKE_TIMEOUT_MS,
 		clients = {},
 		on_message = callbacks.on_message or function() end,
 		on_connect = callbacks.on_connect or function() end,
@@ -48,26 +46,35 @@ function M.create_server(config, callbacks, auth_token)
 		on_error = callbacks.on_error or function(_) end,
 	}
 
-	local ok, err = tcp_server:bind("127.0.0.1", port)
-	if not ok then
-		tcp_server:close()
-		return nil, "Failed to bind to port " .. port .. ": " .. (err or "unknown")
-	end
-
-	local listen_ok, listen_err = tcp_server:listen(128, function(listen_err_inner)
-		if listen_err_inner then
-			server.on_error("Listen error: " .. listen_err_inner)
-			return
+	-- Bind AND listen on the real handle before accepting a port: a separate
+	-- test-bind is racy, and SO_REUSEADDR lets bind() succeed against a port
+	-- another process is already listening on (listen() then fails EADDRINUSE).
+	for _ = 1, MAX_PORT_ATTEMPTS do
+		local port = math.random(min_port, max_port)
+		local tcp_server = vim.loop.new_tcp()
+		if not tcp_server then
+			return nil, "Failed to create TCP server"
 		end
-		M._handle_new_connection(server)
-	end)
 
-	if not listen_ok then
+		local bind_ok = tcp_server:bind("127.0.0.1", port)
+		if bind_ok then
+			local listen_ok = tcp_server:listen(128, function(listen_err_inner)
+				if listen_err_inner then
+					server.on_error("Listen error: " .. listen_err_inner)
+					return
+				end
+				M._handle_new_connection(server)
+			end)
+			if listen_ok then
+				server.server = tcp_server
+				server.port = port
+				return server, nil
+			end
+		end
 		tcp_server:close()
-		return nil, "Failed to listen on port " .. port .. ": " .. (listen_err or "unknown")
 	end
 
-	return server, nil
+	return nil, "No available ports in range " .. min_port .. "-" .. max_port
 end
 
 function M._handle_new_connection(server)
@@ -86,6 +93,23 @@ function M._handle_new_connection(server)
 
 	local client = client_manager.create_client(client_tcp)
 	server.clients[client.id] = client
+
+	-- Drop connections that never finish the WebSocket handshake; otherwise a
+	-- silent socket holds a client slot (and its buffer) forever.
+	local handshake_timer = vim.loop.new_timer()
+	if handshake_timer then
+		client.handshake_timer = handshake_timer
+		handshake_timer:start(server.handshake_timeout_ms or DEFAULT_HANDSHAKE_TIMEOUT_MS, 0, function()
+			handshake_timer:stop()
+			if not handshake_timer:is_closing() then
+				handshake_timer:close()
+			end
+			client.handshake_timer = nil
+			if not client.handshake_complete then
+				M._disconnect_client(server, client, 1006, "Handshake timeout")
+			end
+		end)
+	end
 
 	client_tcp:read_start(function(read_err, data)
 		if read_err then
@@ -118,6 +142,14 @@ function M._disconnect_client(server, client, code, reason)
 
 	server.on_disconnect(client, code, reason)
 	server.clients[client.id] = nil
+
+	if client.handshake_timer then
+		client.handshake_timer:stop()
+		if not client.handshake_timer:is_closing() then
+			client.handshake_timer:close()
+		end
+		client.handshake_timer = nil
+	end
 
 	if not client.tcp_handle:is_closing() then
 		client.tcp_handle:close()

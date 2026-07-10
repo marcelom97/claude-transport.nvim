@@ -1,5 +1,6 @@
 local client_mod = require("claude-transport.server.client")
 local frame = require("claude-transport.server.frame")
+local utils = require("claude-transport.server.utils")
 
 local function make_handle()
 	local h = { writes = {}, closed = false }
@@ -92,6 +93,66 @@ describe("client process_data (post-handshake)", function()
 		end, nil)
 		assert.is_true(err_called)
 		assert.is_true(handle.closed)
+	end)
+
+	it("closes with 1009 when a fragmented message exceeds the size cap", function()
+		local client, handle = connected_client()
+		local err_called = false
+		local orig_cap = client_mod.MAX_MESSAGE_BYTES
+		client_mod.MAX_MESSAGE_BYTES = 16
+
+		local f1 = frame.create_frame(frame.OPCODE.TEXT, string.rep("a", 10), false, true)
+		local f2 = frame.create_frame(frame.OPCODE.CONTINUATION, string.rep("b", 10), false, true)
+		client_mod.process_data(client, f1 .. f2, function() end, function() end, function()
+			err_called = true
+		end, nil)
+
+		client_mod.MAX_MESSAGE_BYTES = orig_cap
+		assert.is_true(err_called)
+		assert.is_true(handle.closed)
+		local close_response = frame.parse_frame(handle.writes[#handle.writes])
+		assert.equals(frame.OPCODE.CLOSE, close_response.opcode)
+		assert.equals(1009, close_response.payload:byte(1) * 256 + close_response.payload:byte(2))
+	end)
+
+	it("responds 1002 to a close frame carrying an invalid close code", function()
+		local client, handle = connected_client()
+		local closed_code
+		local bad_close = frame.create_frame(frame.OPCODE.CLOSE, utils.uint16_to_bytes(999), true, true)
+		client_mod.process_data(client, bad_close, function() end, function(_, code)
+			closed_code = code
+		end, function() end, nil)
+		vim.wait(200, function()
+			return closed_code ~= nil
+		end, 10)
+		assert.equals(1002, closed_code)
+		local close_response = frame.parse_frame(handle.writes[#handle.writes])
+		assert.equals(frame.OPCODE.CLOSE, close_response.opcode)
+		assert.equals(1002, close_response.payload:byte(1) * 256 + close_response.payload:byte(2))
+	end)
+
+	it("closes a connection whose pre-handshake buffer grows without a complete request", function()
+		local handle = make_handle()
+		local client = client_mod.create_client(handle)
+		local err_called = false
+		client_mod.process_data(client, string.rep("x", 10000), function() end, function() end, function()
+			err_called = true
+		end, nil)
+		assert.is_true(err_called)
+		assert.is_true(handle.closed)
+	end)
+
+	it("refuses to queue more data for a backpressured client", function()
+		local client, handle = connected_client()
+		handle.get_write_queue_size = function()
+			return 10 * 1024 * 1024
+		end
+		local err
+		client_mod.send_message(client, "payload", function(e)
+			err = e
+		end)
+		assert.is_not_nil(err)
+		assert.equals(0, #handle.writes)
 	end)
 
 	it("does not close the tcp handle twice when a pending close write completes after disconnect", function()

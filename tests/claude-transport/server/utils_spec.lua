@@ -39,6 +39,27 @@ describe("server utils", function()
 			assert.is_true(utils.is_valid_utf8("héllo wörld"))
 		end)
 
+		it("accepts 4-byte emoji and U+10FFFF", function()
+			assert.is_true(utils.is_valid_utf8("\240\159\146\169")) -- 💩
+			assert.is_true(utils.is_valid_utf8("\244\143\191\191")) -- U+10FFFF
+		end)
+
+		it("rejects overlong encodings", function()
+			assert.is_false(utils.is_valid_utf8("\192\128")) -- overlong NUL
+			assert.is_false(utils.is_valid_utf8("\224\128\128")) -- overlong 3-byte
+			assert.is_false(utils.is_valid_utf8("\240\128\128\128")) -- overlong 4-byte
+		end)
+
+		it("rejects UTF-16 surrogate codepoints", function()
+			assert.is_false(utils.is_valid_utf8("\237\160\128")) -- U+D800
+			assert.is_false(utils.is_valid_utf8("\237\191\191")) -- U+DFFF
+		end)
+
+		it("rejects codepoints above U+10FFFF", function()
+			assert.is_false(utils.is_valid_utf8("\244\144\128\128")) -- U+110000
+			assert.is_false(utils.is_valid_utf8("\245\128\128\128")) -- 0xF5 lead
+		end)
+
 		it("rejects invalid continuation byte", function()
 			assert.is_false(utils.is_valid_utf8("\xC0\x00"))
 		end)

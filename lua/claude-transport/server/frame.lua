@@ -30,12 +30,12 @@ end
 --   success:        value, next_offset[, nil]
 --   incomplete:     nil, 0, nil
 --   protocol error: nil, 0, "<reason>"
-local function parse_header(data)
-	if #data < 2 then
+local function parse_header(data, init)
+	if #data - init + 1 < 2 then
 		return nil, 0, nil
 	end
 
-	local b1, b2 = data:byte(1, 2)
+	local b1, b2 = data:byte(init, init + 1)
 	local fin = math.floor(b1 / 128) == 1
 	local rsv = math.floor((b1 % 128) / 16)
 	local opcode = b1 % 16
@@ -52,7 +52,7 @@ local function parse_header(data)
 		return nil, 0, "control frame must be final and <= 125 bytes"
 	end
 
-	return { fin = fin, opcode = opcode, masked = masked, len_code = len_code }, 3, nil
+	return { fin = fin, opcode = opcode, masked = masked, len_code = len_code }, init + 2, nil
 end
 
 local function parse_payload_length(data, offset, len_code)
@@ -97,17 +97,20 @@ local function read_mask_and_payload(data, offset, length, masked)
 	return payload, mask, offset + length
 end
 
----Parse a single WebSocket frame from the front of a buffer.
+---Parse a single WebSocket frame starting at a buffer offset.
 ---@param data string The raw buffer
+---@param init number|nil 1-based offset to parse from (default 1); lets callers
+---consume many frames from one buffer without re-slicing it per frame
 ---@return table|nil frame The parsed frame, or nil if incomplete/invalid
 ---@return number bytes_consumed Number of bytes consumed (0 if no frame parsed)
 ---@return string|nil error Protocol-error reason; nil means simply incomplete
-function M.parse_frame(data)
+function M.parse_frame(data, init)
 	if type(data) ~= "string" then
 		return nil, 0, nil
 	end
+	init = init or 1
 
-	local header, pos, header_err = parse_header(data)
+	local header, pos, header_err = parse_header(data, init)
 	if not header then
 		return nil, 0, header_err
 	end
@@ -146,7 +149,7 @@ function M.parse_frame(data)
 		mask = mask,
 		payload = payload,
 	},
-		end_pos - 1,
+		end_pos - init,
 		nil
 end
 
