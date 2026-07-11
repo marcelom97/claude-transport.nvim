@@ -121,8 +121,11 @@ function M.create(port, auth_token)
 
 	-- Write to a temp file created with 0600, then rename into place so the
 	-- token is never observable in a partially-written or world-readable file.
+	-- The mode is only applied on creation: remove any leftover temp file and
+	-- open exclusively ("wx") so a pre-existing file can't keep old perms.
 	local tmp_path = lock_path .. ".tmp"
-	local fd, open_err = vim.loop.fs_open(tmp_path, "w", tonumber("600", 8))
+	pcall(os.remove, tmp_path)
+	local fd, open_err = vim.loop.fs_open(tmp_path, "wx", tonumber("600", 8))
 	if not fd then
 		return false, "Failed to create lock file: " .. (open_err or tmp_path)
 	end

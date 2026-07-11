@@ -98,6 +98,24 @@ local function find_main_editor_window()
 	return nil
 end
 
+---Byte column (0-based) of the first byte of the character containing the
+---1-based byte position `col` in `line_text`. A mark set on a continuation
+---byte of a multibyte character lands mid-character.
+---@param line_text string
+---@param col number 1-based byte position of the selection's last byte
+---@return number mark_col 0-based column suitable for nvim_buf_set_mark
+local function mark_col(line_text, col)
+	col = math.min(col, #line_text)
+	if col <= 0 then
+		return 0
+	end
+	local ok, offset = pcall(vim.str_utf_start, line_text, col)
+	if ok and type(offset) == "number" then
+		col = col + offset
+	end
+	return col - 1
+end
+
 --- Handles the openFile tool invocation.
 --- Opens a file in the editor with optional selection.
 ---@param params table The input parameters for the tool
@@ -169,7 +187,7 @@ local function handler(params)
 		-- Marks are (1,0)-indexed: 1-based line, 0-based column
 		local end_line_text = vim.api.nvim_buf_get_lines(0, end_line - 1, end_line, false)[1] or ""
 		vim.api.nvim_buf_set_mark(0, "<", start_line, 0, {})
-		vim.api.nvim_buf_set_mark(0, ">", end_line, math.max(0, #end_line_text - 1), {})
+		vim.api.nvim_buf_set_mark(0, ">", end_line, mark_col(end_line_text, #end_line_text), {})
 		vim.cmd("normal! gv")
 
 		message = "Opened file and selected lines " .. start_line .. " to " .. end_line
@@ -224,8 +242,8 @@ local function handler(params)
 						.. '"'
 				else
 					-- End text not found, select only start text
-					end_line_idx = start_line_idx
-					end_col_idx = start_col_idx + string.len(params.startText) - 1
+					end_line_idx = start_line_idx + 1
+					end_col_idx = start_col_idx + string.len(params.startText)
 					message = 'Opened file and positioned at "'
 						.. params.startText
 						.. '" (end text "'
@@ -234,15 +252,17 @@ local function handler(params)
 				end
 			else
 				-- Only start text provided
-				end_line_idx = start_line_idx
-				end_col_idx = start_col_idx + string.len(params.startText) - 1
+				end_line_idx = start_line_idx + 1
+				end_col_idx = start_col_idx + string.len(params.startText)
 				message = 'Opened file and selected text "' .. params.startText .. '"'
 			end
 
-			-- Apply the selection; marks are (1,0)-indexed
+			-- Apply the selection; marks are (1,0)-indexed. end_line_idx is
+			-- 1-based and end_col_idx is the 1-based byte position of the
+			-- selection's last byte in every branch above.
 			vim.api.nvim_win_set_cursor(0, { start_line_idx + 1, start_col_idx })
 			vim.api.nvim_buf_set_mark(0, "<", start_line_idx + 1, start_col_idx, {})
-			vim.api.nvim_buf_set_mark(0, ">", end_line_idx, math.max(0, end_col_idx - 1), {})
+			vim.api.nvim_buf_set_mark(0, ">", end_line_idx, mark_col(lines[end_line_idx] or "", end_col_idx), {})
 			vim.cmd("normal! gv")
 			vim.cmd("normal! zz") -- Center the selection in the window
 		else

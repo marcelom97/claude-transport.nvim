@@ -151,7 +151,9 @@ function M._disconnect_client(server, client, code, reason)
 		client.handshake_timer = nil
 	end
 
-	if not client.tcp_handle:is_closing() then
+	-- When a close-frame write is in flight, its write callback closes the
+	-- handle; closing here would cancel that write and reset the connection.
+	if not client.close_write_pending and not client.tcp_handle:is_closing() then
 		client.tcp_handle:close()
 	end
 end

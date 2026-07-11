@@ -219,7 +219,9 @@ function M.send_response(client, id, result, error_data)
 	if not M.state.server then
 		return false
 	end
-	local response = { jsonrpc = "2.0", id = id }
+	-- vim.json.encode drops nil-valued keys, but JSON-RPC 2.0 requires
+	-- "id": null on responses to requests whose id could not be read.
+	local response = { jsonrpc = "2.0", id = id == nil and vim.NIL or id }
 	if error_data then
 		response.error = error_data
 	else

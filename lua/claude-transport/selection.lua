@@ -239,10 +239,9 @@ function M.get_visual_selection()
 		return nil
 	end
 
-	local vmode = vim.fn.visualmode()
-	if not vmode or vmode == "" then
-		vmode = mode
-	end
+	-- mode from nvim_get_mode() is the live visual mode; vim.fn.visualmode()
+	-- only reports the last *completed* selection and can be stale here.
+	local vmode = mode
 
 	local s, e = get_selection_coords()
 	local bufnr = vim.api.nvim_get_current_buf()

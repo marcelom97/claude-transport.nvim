@@ -92,6 +92,35 @@ describe("tools", function()
 			assert.equals(1, e[2])
 			assert.equals(11, e[3]) -- 1-based col of last char of "baz"
 		end)
+
+		it("selects a startText-only match on line 1", function()
+			local full = dir .. "/start_only.txt"
+			vim.fn.writefile({ "alpha beta", "gamma" }, full)
+
+			local ok, res = pcall(open_file.handler, { filePath = full, startText = "beta" })
+			assert.is_true(ok)
+			assert.matches('selected text "beta"', res.content[1].text)
+			vim.cmd("normal! \27")
+			local s = vim.fn.getpos("'<")
+			local e = vim.fn.getpos("'>")
+			assert.equals(1, s[2])
+			assert.equals(7, s[3]) -- 1-based col of "beta"
+			assert.equals(1, e[2])
+			assert.equals(10, e[3]) -- 1-based col of last char of "beta"
+		end)
+
+		it("places the end mark on the last character, not mid-byte, for multibyte lines", function()
+			local full = dir .. "/multibyte.txt"
+			vim.fn.writefile({ "héllo wörld…" }, full)
+
+			local ok = pcall(open_file.handler, { filePath = full, startLine = 1, endLine = 1 })
+			assert.is_true(ok)
+			vim.cmd("normal! \27")
+			local e = vim.fn.getpos("'>")
+			-- "…" is 3 bytes; the mark must sit on its first byte.
+			local line = "héllo wörld…"
+			assert.equals(#line - 3 + 1, e[3])
+		end)
 	end)
 
 	describe("getLatestSelection", function()

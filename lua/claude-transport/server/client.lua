@@ -19,6 +19,9 @@ M.MAX_WRITE_QUEUE_BYTES = 4 * 1024 * 1024
 ---@field state string Connection state: "connecting", "connected", "closing", "closed"
 ---@field buffer string Incoming data buffer
 ---@field handshake_complete boolean Whether WebSocket handshake is complete
+---@field handshake_pending boolean|nil True while the handshake response write is in flight
+---@field close_write_pending boolean|nil True while a close-frame write owns the handle shutdown
+---@field handshake_timer table|nil Timer that drops connections that never complete the handshake
 ---@field last_ping number Timestamp of last ping sent
 ---@field last_pong number Timestamp of last pong received
 ---@field fragment table|nil In-progress fragmented message: { opcode = number, parts = string[] }
@@ -96,6 +99,12 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 	client.buffer = client.buffer .. data
 
 	if not client.handshake_complete then
+		-- A handshake response write is already in flight: leave the new bytes
+		-- buffered until it lands, otherwise re-extracting the request here
+		-- would answer it a second time.
+		if client.handshake_pending then
+			return
+		end
 		if #client.buffer > M.MAX_HANDSHAKE_BYTES then
 			client.buffer = ""
 			on_error(client, "Handshake request exceeds " .. M.MAX_HANDSHAKE_BYTES .. " bytes")
@@ -112,7 +121,13 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 				logger.warn("client", "WebSocket handshake failed:", client.id)
 			end
 
+			-- Consume the request now so bytes arriving before the write
+			-- completes accumulate after it instead of being lost.
+			client.handshake_pending = true
+			client.buffer = remaining
+
 			client.tcp_handle:write(response_from_handshake, function(err)
+				client.handshake_pending = false
 				if err then
 					logger.error("client", "Failed to send handshake response to client " .. client.id .. ": " .. err)
 					on_error(client, "Failed to send handshake response: " .. err)
@@ -122,7 +137,6 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 				if success then
 					client.handshake_complete = true
 					client.state = "connected"
-					client.buffer = remaining
 					logger.debug("client", "WebSocket connection established for client:", client.id)
 
 					if #client.buffer > 0 then
@@ -132,7 +146,9 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 					client.state = "closing"
 					logger.debug("client", "Closing connection for client due to failed handshake:", client.id)
 					vim.schedule(function()
-						client.tcp_handle:close()
+						if not client.tcp_handle:is_closing() then
+							client.tcp_handle:close()
+						end
 					end)
 				end
 			end)
@@ -183,6 +199,14 @@ function M.process_data(client, data, on_message, on_close, on_error, auth_token
 			if parsed_frame.fin then
 				handle_data_frame(parsed_frame, client, on_message)
 			else
+				-- Cap the first fragment too; otherwise this only holds because
+				-- frame.lua's per-frame cap happens to match MAX_MESSAGE_BYTES.
+				if #parsed_frame.payload > M.MAX_MESSAGE_BYTES then
+					commit()
+					on_error(client, "Protocol error: fragmented message exceeds size cap")
+					M.close_client(client, 1009, "message too big")
+					return
+				end
 				client.fragment = { opcode = opcode, parts = { parsed_frame.payload }, size = #parsed_frame.payload }
 			end
 		elseif opcode == frame.OPCODE.CONTINUATION then
@@ -274,7 +298,12 @@ function M.close_client(client, code, reason)
 
 	if client.handshake_complete and not client.tcp_handle:is_closing() then
 		local close_frame = frame.create_close_frame(code, reason)
+		-- Mark the write as owning the shutdown so disconnect paths don't
+		-- close the handle underneath it (uv_close cancels pending writes,
+		-- turning the clean close into a TCP reset for the peer).
+		client.close_write_pending = true
 		client.tcp_handle:write(close_frame, function()
+			client.close_write_pending = false
 			client.state = "closed"
 			-- The handle may already have been closed by a disconnect path
 			-- while this write was in flight; closing twice crashes libuv.
