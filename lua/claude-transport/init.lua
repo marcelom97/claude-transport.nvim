@@ -212,6 +212,10 @@ function M.send(connection_id, method, params)
 	return true
 end
 
+---Send a wire-format mention; omit line bounds to mention the whole file.
+---@param file_path string
+---@param start_line? number 0-based inclusive first line
+---@param end_line? number 0-based inclusive last line
 function M.notify_at_mention(file_path, start_line, end_line)
 	return M.broadcast("at_mentioned", {
 		filePath = file_path,
@@ -236,7 +240,8 @@ function M.send_at_mention(start_line, end_line)
 	if not file_path or file_path == "" then
 		return false, "current buffer is not backed by a file"
 	end
-	M.notify_at_mention(file_path, start_line, end_line)
+	-- Neovim ranges are 1-based; Claude's at_mentioned bounds are 0-based and inclusive.
+	M.notify_at_mention(file_path, start_line - 1, end_line - 1)
 	return true
 end
 

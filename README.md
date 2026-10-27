@@ -80,8 +80,8 @@ transport.get_connections()    -- list of connected client info
 -- Messaging
 transport.broadcast(method, params)           -- send to all clients
 transport.send(connection_id, method, params) -- send to specific client
-transport.notify_at_mention(file, start_line, end_line) -- file mention
-transport.send_at_mention(start_line, end_line) -- mention current buffer's range
+transport.notify_at_mention(file, start_line, end_line) -- 0-based inclusive bounds; omit for whole file
+transport.send_at_mention(start_line, end_line) -- current buffer's 1-based inclusive editor range
 
 -- Tools
 transport.register_tool(name, schema, handler)
